@@ -1,0 +1,302 @@
+<Window x:Class="NeoDenSoftware.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:NeoDenSoftware"
+        xmlns:footprints="clr-namespace:NeoDenSoftware.Footprints"
+        mc:Ignorable="d"
+        Title="NeoDen Gerber Viewer" Height="700" Width="1400"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Closing="Window_Closing">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Menu Grid.Row="0">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Save Project..." Command="{Binding SaveProjectCommand}"/>
+                <MenuItem Header="_Load Project..." Command="{Binding LoadProjectCommand}"/>
+                <Separator/>
+                <MenuItem Header="Manage _Footprint Library..." Click="ManageFootprintLibrary_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Settings">
+                <MenuItem Header="_Tape Feeder Positions" Click="TapeFeederPositions_Click"/>
+                <MenuItem Header="_Board Origin..." Click="BoardOrigin_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <ToolBar Grid.Row="1">
+            <Button Content="Import Gerber Zip..." Command="{Binding ImportCommand}" Padding="8,2"/>
+            <TextBlock Text="PCB Thickness (mm):" VerticalAlignment="Center" Margin="8,0,4,0"/>
+            <TextBox Text="{Binding PcbThicknessMm, UpdateSourceTrigger=PropertyChanged}" Width="50" VerticalAlignment="Center"/>
+            <Separator/>
+            <Button Content="Import BOM + PnP..." Command="{Binding ImportComponentsCommand}" Padding="8,2"/>
+        </ToolBar>
+
+        <TabControl x:Name="MainTabControl" Grid.Row="2">
+        <TabItem Header="Board View">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="420"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <CheckBox DockPanel.Dock="Bottom" Margin="8" IsChecked="{Binding MirrorBottomLayers}">
+                        <TextBlock Text="Invert X on bottom layers" TextWrapping="Wrap" Width="180"/>
+                    </CheckBox>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Layers" FontWeight="Bold" Margin="8"/>
+                            <ItemsControl ItemsSource="{Binding Layers}" Margin="4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="4,4">
+                                            <CheckBox IsChecked="{Binding IsVisible}" VerticalAlignment="Center"/>
+                                            <Rectangle Width="14" Height="14" Fill="{Binding Color}" Margin="6,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="Fiducials" FontWeight="Bold" Margin="8,16,8,4"/>
+
+                            <Grid Margin="8,4,8,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Top Layer" FontStyle="Italic" Foreground="Gray" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="+ Add" Padding="4,0" FontSize="10" Command="{Binding AddTopFiducialCommand}"/>
+                            </Grid>
+                            <ItemsControl ItemsSource="{Binding TopFiducials}" Margin="4,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="4,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="38"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="50"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="50"/>
+                                                <ColumnDefinition Width="18"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Text="{Binding Designator, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,2,0"/>
+                                            <TextBlock Grid.Column="1" Text="X:" VerticalAlignment="Center"/>
+                                            <TextBox Grid.Column="2" Text="{Binding X, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}" Margin="0,0,4,0"/>
+                                            <TextBlock Grid.Column="3" Text="Y:" VerticalAlignment="Center"/>
+                                            <TextBox Grid.Column="4" Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}"/>
+                                            <Button Grid.Column="5" Content="x" Padding="0" FontSize="10" Margin="2,0,0,0"
+                                                    Command="{Binding DataContext.RemoveFiducialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Grid Margin="8,8,8,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Bottom Layer" FontStyle="Italic" Foreground="Gray" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="+ Add" Padding="4,0" FontSize="10" Command="{Binding AddBottomFiducialCommand}"/>
+                            </Grid>
+                            <ItemsControl ItemsSource="{Binding BottomFiducials}" Margin="4,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="4,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="38"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="50"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="50"/>
+                                                <ColumnDefinition Width="18"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Text="{Binding Designator, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,2,0"/>
+                                            <TextBlock Grid.Column="1" Text="X:" VerticalAlignment="Center"/>
+                                            <TextBox Grid.Column="2" Text="{Binding X, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}" Margin="0,0,4,0"/>
+                                            <TextBlock Grid.Column="3" Text="Y:" VerticalAlignment="Center"/>
+                                            <TextBox Grid.Column="4" Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}"/>
+                                            <Button Grid.Column="5" Content="x" Padding="0" FontSize="10" Margin="2,0,0,0"
+                                                    Command="{Binding DataContext.RemoveFiducialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <Border x:Name="ViewportBorder" ClipToBounds="True" Focusable="True"
+                        MouseWheel="ViewportBorder_MouseWheel"
+                        MouseLeftButtonDown="ViewportBorder_MouseLeftButtonDown"
+                        MouseLeftButtonUp="ViewportBorder_MouseLeftButtonUp"
+                        MouseMove="ViewportBorder_MouseMove"
+                        MouseLeave="ViewportBorder_MouseLeave"
+                        KeyDown="ViewportBorder_KeyDown">
+                    <Grid>
+                        <!-- Permanent scene furniture (steel rails, axis scale, LED ring) - populated
+                             once at startup, not tied to Layers, no visibility toggle. Behind LayerHost
+                             so imported board content draws on top of it. -->
+                        <Canvas x:Name="FixturesHost" RenderTransformOrigin="0,0" IsHitTestVisible="False"/>
+                        <Canvas x:Name="LayerHost" RenderTransformOrigin="0,0"/>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="ComponentInfoPanel" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12"
+                        Background="#DD1E1E1E" BorderBrush="Gray" BorderThickness="1" Padding="10"
+                        Visibility="Collapsed" IsHitTestVisible="False">
+                    <StackPanel Orientation="Horizontal">
+                        <ContentPresenter x:Name="ComponentInfoPreview" Width="48" Height="48" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="ComponentInfoDesignator" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock x:Name="ComponentInfoComment" Foreground="White"/>
+                            <TextBlock x:Name="ComponentInfoPosition" Foreground="White"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" BorderBrush="Gray" BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="BOM" FontWeight="Bold" Margin="8"/>
+                    <DataGrid ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False"
+                              RowHeaderWidth="0" RowHeight="44" Margin="4">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Pkg" Width="46">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ContentPresenter Content="{Binding PreviewHost}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Ref" Binding="{Binding DesignatorsText}" Width="110" IsReadOnly="True">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                        <Setter Property="ToolTip" Value="{Binding DesignatorsText}"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="55" IsReadOnly="True"/>
+                            <DataGridComboBoxColumn Header="Footprint"
+                                                     SelectedItemBinding="{Binding SelectedFootprint}"
+                                                     DisplayMemberPath="Name"
+                                                     ItemsSource="{x:Static footprints:FootprintLibrary.AllWithNoMatch}"
+                                                     Width="100"/>
+                            <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="55" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Status" Binding="{Binding PlacementStatus}" Width="80" IsReadOnly="True"/>
+                            <DataGridTemplateColumn Header="" Width="60">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="Remove" Padding="4,0"
+                                                Command="{Binding DataContext.RemoveComponentGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+        </Grid>
+        </TabItem>
+
+        <TabItem Header="NeoDen4 Feeder Setup">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <Button Content="Auto-Assign Feeders" Command="{Binding AutoAssignFeedersCommand}" Click="CommitFeederSetupEdits_Click" Padding="8,2"/>
+                    <Button Content="Create NeoDen4 File..." Command="{Binding GenerateNeoDenCsvCommand}" Click="CommitFeederSetupEdits_Click" Padding="8,2" Margin="8,0,0,0"/>
+                    <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"
+                               Text="Unchecked parts: feeders 1-40.  Checked (high bank) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
+                </StackPanel>
+                <DataGrid x:Name="FeederSetupDataGrid" ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Ref" Binding="{Binding DesignatorsText}" Width="160" IsReadOnly="True">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="ToolTip" Value="{Binding DesignatorsText}"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="100" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Footprint" Binding="{Binding FootprintText}" Width="160" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="60" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Feeder" Binding="{Binding FeederNumber}" Width="70"/>
+                        <DataGridCheckBoxColumn Header="High Bank (54-99)" Binding="{Binding UseHighFeederBank}" Width="130"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </TabItem>
+
+        <TabItem x:Name="SettingsTabItem" Header="Settings">
+            <Grid Margin="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="3*"/>
+                    <RowDefinition Height="2*"/>
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                    <TextBlock DockPanel.Dock="Top" Text="Tape Feeder Positions" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
+                               Text="World-space X/Y/Angle (mm/degrees) for each tape feeder slot. Edits here move the feeder live on the Board View canvas."/>
+                    <DataGrid x:Name="TapeFeederSettingsDataGrid" ItemsSource="{Binding TapeFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Feeder #" Binding="{Binding Number}" Width="80" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="X (mm)" Binding="{Binding X}" Width="100"/>
+                            <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y}" Width="100"/>
+                            <DataGridTextColumn Header="Angle (deg)" Binding="{Binding Angle}" Width="100"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+
+                <DockPanel Grid.Row="1">
+                    <TextBlock DockPanel.Dock="Top" Text="Tray Feeder Positions" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
+                               Text="World-space begin/end X/Y (mm) and grid size for each tray feeder slot."/>
+                    <DataGrid x:Name="TrayFeederSettingsDataGrid" ItemsSource="{Binding TrayFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Feeder ID" Binding="{Binding FeederId}" Width="80" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Begin X (mm)" Binding="{Binding BeginX}" Width="100"/>
+                            <DataGridTextColumn Header="Begin Y (mm)" Binding="{Binding BeginY}" Width="100"/>
+                            <DataGridTextColumn Header="End X (mm)" Binding="{Binding EndX}" Width="100"/>
+                            <DataGridTextColumn Header="End Y (mm)" Binding="{Binding EndY}" Width="100"/>
+                            <DataGridTextColumn Header="Rows" Binding="{Binding Rows}" Width="70"/>
+                            <DataGridTextColumn Header="Columns" Binding="{Binding Columns}" Width="70"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Grid>
+        </TabItem>
+        </TabControl>
+
+        <StatusBar Grid.Row="3">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}"/>
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock x:Name="StatusBarPickHint" Foreground="Orange" FontWeight="Bold"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="MouseXText" Text="X: --" Width="110"/>
+                    <TextBlock x:Name="MouseYText" Text="Y: --" Width="110"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

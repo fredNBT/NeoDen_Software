@@ -4,7 +4,7 @@ namespace NeoDenSoftware.Models;
 /// user's edits (footprint override, rotation, feeder assignment) on top of a fresh re-import from
 /// the original BOM/PnP files. A designator present in the BOM but missing from this list means
 /// the user had removed that component before saving.</summary>
-public sealed record ProjectComponentRow(string Designator, string FootprintName, double RotationDegrees, int? FeederNumber, bool UseHighFeederBank);
+public sealed record ProjectComponentRow(string Designator, string FootprintName, double RotationDegrees, int? FeederNumber, bool UseTrayFeeder);
 
 /// <summary>One saved fiducial row (Top or Bottom) - the full list replaces whatever auto-import
 /// would detect, since fiducials can be manually added/edited/removed in ways a fresh BOM/PnP

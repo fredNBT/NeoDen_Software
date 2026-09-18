@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
+using NeoDenSoftware.Dxf;
 using NeoDenSoftware.Feeders;
 using NeoDenSoftware.Footprints;
 using NeoDenSoftware.Gerber;
@@ -13,6 +14,7 @@ using NeoDenSoftware.Import;
 using NeoDenSoftware.Models;
 using NeoDenSoftware.Project;
 using NeoDenSoftware.Rendering;
+using NeoDenSoftware.Stl;
 
 namespace NeoDenSoftware.ViewModels;
 
@@ -77,6 +79,12 @@ public sealed class MainViewModel : ViewModelBase
     private Canvas? _topComponentsHost;
     private Canvas? _bottomComponentsHost;
 
+    // The Outline layer's own geometry (already shifted into board/machine coordinates, same
+    // frame as everything else this app exports) - kept around purely so "Create NeoDen4 File..."
+    // can also export a DXF of the board outline, without needing to re-parse the Gerber zip.
+    // Null whenever the current import has no recognized Outline file.
+    private ParsedLayer? _outlineLayer;
+
     // Remembered so "Save Project" can write them out without re-prompting, and so a later
     // "Load Project" can re-run the exact same import(s) without asking the user to re-pick files
     // or re-answer the column mapping dialogs. Only ever set on a successful import (Gerber/BOM/PnP
@@ -91,6 +99,21 @@ public sealed class MainViewModel : ViewModelBase
 
     private ComponentViewModel? _selectedComponent;
     private FiducialViewModel? _pendingFiducialPick;
+
+    // Manual "combine rows" overrides for the Feeder Setup grid - designators listed here group
+    // together into one BomGroupViewModel by shared merge-group id instead of by the usual
+    // (Value, FootprintText, Side) key, letting the user force otherwise-different parts onto one
+    // feeder. Keyed by Designator (stable identity - Components has no other unique key). Survives
+    // RebuildBomGroups (import/removal don't clear it) but is intentionally in-memory only, not
+    // persisted to the project file - "combine" is treated as a working-session convenience, not a
+    // durable project setting, unless a later request asks for it to survive a save/reload.
+    private readonly Dictionary<string, int> _mergedGroupId = new();
+    private int _nextMergedGroupId = 1;
+
+    // Each entry is the pre-combine state (designator -> previous merge-group id, or null if it
+    // wasn't merged) for one Combine action, so Ctrl+Z can restore exactly that, and repeated
+    // Ctrl+Z walks back through however many combines happened this session.
+    private readonly Stack<Dictionary<string, int?>> _combineUndoStack = new();
 
     public ObservableCollection<LayerViewModel> Layers { get; } = [];
     public ObservableCollection<ComponentViewModel> Components { get; } = [];
@@ -130,6 +153,12 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand RemoveFiducialCommand { get; }
     public ICommand SaveProjectCommand { get; }
     public ICommand LoadProjectCommand { get; }
+    public ICommand AddTapeFeederCommand { get; }
+    public ICommand RemoveTapeFeederCommand { get; }
+    public ICommand AddTrayFeederCommand { get; }
+    public ICommand RemoveTrayFeederCommand { get; }
+    public ICommand CombineSelectedGroupsCommand { get; }
+    public ICommand UndoCombineCommand { get; }
 
     /// <summary>The component last clicked on the canvas, if any - drives the info panel and
     /// what the spacebar rotates.</summary>
@@ -190,6 +219,11 @@ public sealed class MainViewModel : ViewModelBase
         get => _statusMessage;
         set => SetField(ref _statusMessage, value);
     }
+
+    /// <summary>Whether there's a Combine action left to undo (Ctrl+Z / the Undo Combine button) -
+    /// exposed so the button can gray itself out via a plain binding rather than always being
+    /// clickable and just no-op'ing.</summary>
+    public bool CanUndoCombine => _combineUndoStack.Count > 0;
 
     /// <summary>PCB thickness in mm, set alongside a Gerber import (defaults to the common 1.6mm)
     /// - not used by anything yet, captured for a later feature.</summary>
@@ -253,24 +287,122 @@ public sealed class MainViewModel : ViewModelBase
         });
         SaveProjectCommand = new RelayCommand(_ => SaveProject());
         LoadProjectCommand = new AsyncRelayCommand(async _ => await LoadProjectAsync());
+        AddTapeFeederCommand = new RelayCommand(_ => AddTapeFeeder());
+        RemoveTapeFeederCommand = new RelayCommand(param =>
+        {
+            if (param is TapeFeederSettingViewModel feeder) RemoveTapeFeeder(feeder);
+        });
+        AddTrayFeederCommand = new RelayCommand(_ => AddTrayFeeder());
+        RemoveTrayFeederCommand = new RelayCommand(param =>
+        {
+            if (param is TrayFeederSettingViewModel tray) RemoveTrayFeeder(tray);
+        });
+        CombineSelectedGroupsCommand = new RelayCommand(param =>
+        {
+            if (param is IEnumerable<BomGroupViewModel> groups) CombineGroups(groups.ToList());
+        });
+        UndoCombineCommand = new RelayCommand(_ => UndoCombine(), _ => CanUndoCombine);
     }
 
     /// <summary>Loads any saved tape feeder overrides once (not once per feeder), applying each on
     /// top of that feeder's hardcoded default - a feeder with no saved override just keeps using
     /// the default, so this works fine on a first run with no <see cref="FeederPositionStore"/>
-    /// file yet.</summary>
+    /// file yet. A saved override whose number ISN'T one of the hardcoded defaults is a
+    /// user-added extra feeder (via "+ Add") from a previous session - restored here too,
+    /// otherwise it would silently vanish the moment the app restarts despite having been saved.
+    /// A hardcoded default the user has since deleted is skipped entirely (see
+    /// <see cref="FeederPositionStore.LoadDeletedTapeDefaults"/>), otherwise it would keep coming
+    /// back on every restart despite being deleted.</summary>
     private static IEnumerable<TapeFeederSettingViewModel> BuildTapeFeederSettings()
     {
         var overrides = FeederPositionStore.LoadTapeOverrides();
-        return TapeFeederLibrary.Defaults.Select(f =>
-            new TapeFeederSettingViewModel(f.Number, overrides.GetValueOrDefault(f.Number, f.Position)));
+        var deletedDefaults = FeederPositionStore.LoadDeletedTapeDefaults();
+        var defaultNumbers = TapeFeederLibrary.Defaults.Select(f => f.Number).ToHashSet();
+
+        var fromDefaults = TapeFeederLibrary.Defaults
+            .Where(f => !deletedDefaults.Contains(f.Number))
+            .Select(f => new TapeFeederSettingViewModel(f.Number, overrides.GetValueOrDefault(f.Number, f.Position), isDefault: true));
+
+        var addedExtras = overrides
+            .Where(kv => !defaultNumbers.Contains(kv.Key))
+            .OrderBy(kv => int.TryParse(kv.Key, out var n) ? n : int.MaxValue)
+            .Select(kv => new TapeFeederSettingViewModel(kv.Key, kv.Value));
+
+        return fromDefaults.Concat(addedExtras);
     }
 
+    /// <summary>Adds a new tape feeder slot beyond the hardcoded default set, numbered one past
+    /// whatever the highest current feeder number is (default or previously added) - the user can
+    /// then reposition it via the Settings tab grid like any other feeder. Saved immediately
+    /// (even before any edit) so a freshly-added, still-default-positioned feeder isn't silently
+    /// lost if the app closes before the user edits its X/Y/Angle.</summary>
+    private void AddTapeFeeder()
+    {
+        var nextNumber = TapeFeederSettings
+            .Select(f => int.TryParse(f.Number, out var n) ? n : 0)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+
+        var position = new TapeFeederXY(0, 0, 90);
+        var feeder = new TapeFeederSettingViewModel(nextNumber.ToString(), position);
+        FeederPositionStore.SaveTapeFeeder(feeder.Number, position);
+        TapeFeederSettings.Add(feeder);
+        StatusMessage = $"Added tape feeder {feeder.Number}.";
+    }
+
+    /// <summary>Removes any tape feeder, default or added. An added feeder's saved override is
+    /// just dropped; a default one additionally gets tombstoned
+    /// (<see cref="FeederPositionStore.MarkTapeDefaultDeleted"/>) so <see cref="BuildTapeFeederSettings"/>
+    /// doesn't resurrect it from <see cref="TapeFeederLibrary.Defaults"/> on the next restart.</summary>
+    private void RemoveTapeFeeder(TapeFeederSettingViewModel feeder)
+    {
+        TapeFeederSettings.Remove(feeder);
+        FeederPositionStore.DeleteTapeFeeder(feeder.Number);
+        if (feeder.IsDefault)
+            FeederPositionStore.MarkTapeDefaultDeleted(feeder.Number);
+        StatusMessage = $"Removed tape feeder {feeder.Number}.";
+    }
+
+    /// <summary>Same "defaults + restore any saved extras" shape as <see cref="BuildTapeFeederSettings"/> -
+    /// see that method's doc comment for why the "extras" half matters.</summary>
     private static IEnumerable<TrayFeederSettingViewModel> BuildTrayFeederSettings()
     {
         var overrides = FeederPositionStore.LoadTrayOverrides();
-        return TrayFeederLibrary.Defaults.Select(p =>
+        var defaultIds = TrayFeederLibrary.Defaults.Select(p => p.FeederId).ToHashSet();
+
+        var fromDefaults = TrayFeederLibrary.Defaults.Select(p =>
             new TrayFeederSettingViewModel(overrides.GetValueOrDefault(p.FeederId, p)));
+
+        var addedExtras = overrides.Values
+            .Where(p => !defaultIds.Contains(p.FeederId))
+            .OrderBy(p => p.FeederId)
+            .Select(p => new TrayFeederSettingViewModel(p, isRemovable: true));
+
+        return fromDefaults.Concat(addedExtras);
+    }
+
+    /// <summary>Adds a new tray feeder slot beyond the hardcoded default set, numbered one past
+    /// whatever the highest current FeederId is (default or previously added). Starts as an
+    /// unconfigured single point (Begin=End=(0,0), 1x1) for the user to fill in via the Settings
+    /// tab grid - saved immediately, same reasoning as <see cref="AddTapeFeeder"/>.</summary>
+    private void AddTrayFeeder()
+    {
+        var nextId = TrayFeederSettings.Select(f => f.FeederId).DefaultIfEmpty(0).Max() + 1;
+        var position = new TrayFeederPosition(nextId, 0, 0, 0, 0, 1, 1);
+        var tray = new TrayFeederSettingViewModel(position, isRemovable: true);
+        FeederPositionStore.SaveTrayFeeder(position);
+        TrayFeederSettings.Add(tray);
+        StatusMessage = $"Added tray feeder {tray.FeederId}.";
+    }
+
+    /// <summary>Only ever called for a user-added tray (<see cref="TrayFeederSettingViewModel.IsRemovable"/>) -
+    /// same guard/cleanup shape as <see cref="RemoveTapeFeeder"/>.</summary>
+    private void RemoveTrayFeeder(TrayFeederSettingViewModel tray)
+    {
+        if (!tray.IsRemovable) return;
+        TrayFeederSettings.Remove(tray);
+        FeederPositionStore.DeleteTrayFeeder(tray.FeederId);
+        StatusMessage = $"Removed tray feeder {tray.FeederId}.";
     }
 
     /// <summary>
@@ -602,6 +734,11 @@ public sealed class MainViewModel : ViewModelBase
                      or GerberLayerRole.TopSoldermask or GerberLayerRole.BottomSoldermask or GerberLayerRole.Outline).ToList())
             Layers.Remove(stale);
 
+        // Reset before the loop below (not just left stale) so a re-import whose file set no
+        // longer includes a recognized Outline file doesn't keep exporting the PREVIOUS board's
+        // outline DXF - a mismatch that would silently ship a wrong board outline for the new board.
+        _outlineLayer = null;
+
         var combinedBounds = BoundingBox.Empty;
 
         foreach (var (role, layer) in parsedLayers)
@@ -615,6 +752,9 @@ public sealed class MainViewModel : ViewModelBase
                 Color = DefaultColorFor(role),
                 Visual = visual,
             });
+
+            if (role == GerberLayerRole.Outline)
+                _outlineLayer = shiftedLayer;
 
             if (shiftedLayer.Bounds.MaxX >= shiftedLayer.Bounds.MinX)
                 combinedBounds = combinedBounds.Include(shiftedLayer.Bounds);
@@ -823,7 +963,7 @@ public sealed class MainViewModel : ViewModelBase
             _lastZipPath, _lastBomPath, _lastPnpPath,
             BoardOriginX, BoardOriginY, PcbThicknessMm, MirrorBottomLayers,
             _lastBomMapping, _lastPnpMapping,
-            Components.Select(c => new ProjectComponentRow(c.Designator, c.SelectedFootprint.Name, c.RotationDegrees, c.FeederNumber, c.UseHighFeederBank)).ToList(),
+            Components.Select(c => new ProjectComponentRow(c.Designator, c.SelectedFootprint.Name, c.RotationDegrees, c.FeederNumber, c.UseTrayFeeder)).ToList(),
             TopFiducials.Select(f => new ProjectFiducialRow(BoardSide.Top, f.Designator, f.X, f.Y))
                 .Concat(BottomFiducials.Select(f => new ProjectFiducialRow(BoardSide.Bottom, f.Designator, f.X, f.Y)))
                 .ToList(),
@@ -904,7 +1044,7 @@ public sealed class MainViewModel : ViewModelBase
             if (footprint is not null) component.SelectedFootprint = footprint;
             component.RotationDegrees = saved.RotationDegrees;
             component.FeederNumber = saved.FeederNumber;
-            component.UseHighFeederBank = saved.UseHighFeederBank;
+            component.UseTrayFeeder = saved.UseTrayFeeder;
         }
 
         // Replace whatever the BOM/PnP re-import auto-detected with the exact saved fiducial set.
@@ -923,7 +1063,7 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     /// <summary>Redraws each tape/tray feeder's assigned-component image/label from whatever
-    /// FeederNumber/UseHighFeederBank the Components currently carry, WITHOUT reassigning any
+    /// FeederNumber/UseTrayFeeder the Components currently carry, WITHOUT reassigning any
     /// numbers - unlike <see cref="AutoAssignFeeders"/>, which both assigns numbers and draws
     /// visuals in one pass. Needed after <see cref="LoadProjectAsync"/> restores feeder
     /// assignments that were made in a previous session, so the Board View's feeder visuals catch
@@ -936,7 +1076,7 @@ public sealed class MainViewModel : ViewModelBase
         foreach (var group in Components.Where(c => c.FeederNumber is not null).GroupBy(c => c.FeederNumber!.Value))
         {
             var representative = group.First();
-            if (representative.UseHighFeederBank)
+            if (representative.UseTrayFeeder)
             {
                 var tray = TrayFeederSettings.FirstOrDefault(f => f.FeederId == group.Key);
                 tray?.SetAssignedComponent(representative.Value, representative.SelectedFootprint);
@@ -957,8 +1097,63 @@ public sealed class MainViewModel : ViewModelBase
         foreach (var old in BomGroups)
             old.Detach();
         BomGroups.Clear();
-        foreach (var group in Components.GroupBy(c => (Value: c.Value ?? "", FootprintText: c.FootprintText ?? "", c.Side)))
+        foreach (var group in Components.GroupBy(GroupKeyFor))
             BomGroups.Add(new BomGroupViewModel(group.ToList()));
+    }
+
+    /// <summary>Normal grouping key is (Value, FootprintText, Side); a component whose designator
+    /// was folded into a manual "Combine" merge (<see cref="_mergedGroupId"/>) uses that merge id
+    /// instead, regardless of its own Value/Footprint/Side - the whole point of Combine is forcing
+    /// otherwise-different parts to share one row/one feeder. A leading control character keeps
+    /// merge keys from ever colliding with a real "Value|Footprint|Side" string.</summary>
+    private string GroupKeyFor(ComponentViewModel c) =>
+        _mergedGroupId.TryGetValue(c.Designator, out var mergeId)
+            ? $"{mergeId}"
+            : $"{c.Value ?? ""}{c.FootprintText ?? ""}{c.Side}";
+
+    /// <summary>Merges two or more Feeder Setup rows into one, so their members share a single row
+    /// (and, once the user sets it, a single Feeder number) regardless of differing Value/Footprint/
+    /// Side - e.g. combining several different-valued capacitors that the user wants loaded on one
+    /// physical reel. Records the pre-merge state on <see cref="_combineUndoStack"/> first, so
+    /// Ctrl+Z / Undo Combine can restore exactly what was there before.</summary>
+    public void CombineGroups(IReadOnlyList<BomGroupViewModel> groups)
+    {
+        var designators = groups.SelectMany(g => g.Members).Select(m => m.Designator).Distinct().ToList();
+        if (designators.Count < 2)
+        {
+            StatusMessage = "Select two or more rows to combine.";
+            return;
+        }
+
+        var previous = designators.ToDictionary(d => d, d => _mergedGroupId.TryGetValue(d, out var id) ? (int?)id : null);
+        _combineUndoStack.Push(previous);
+        OnPropertyChanged(nameof(CanUndoCombine));
+
+        var newMergeId = _nextMergedGroupId++;
+        foreach (var designator in designators)
+            _mergedGroupId[designator] = newMergeId;
+
+        RebuildBomGroups();
+        StatusMessage = $"Combined {designators.Count} component(s) into one feeder row.";
+    }
+
+    /// <summary>Undoes the most recent <see cref="CombineGroups"/> call - wired to Ctrl+Z and the
+    /// Undo Combine button. Only ever undoes combine actions (this app has no other undo history);
+    /// repeated calls walk back through however many combines happened this session.</summary>
+    public void UndoCombine()
+    {
+        if (_combineUndoStack.Count == 0) return;
+
+        var previous = _combineUndoStack.Pop();
+        foreach (var (designator, mergeId) in previous)
+        {
+            if (mergeId is null) _mergedGroupId.Remove(designator);
+            else _mergedGroupId[designator] = mergeId.Value;
+        }
+
+        RebuildBomGroups();
+        OnPropertyChanged(nameof(CanUndoCombine));
+        StatusMessage = "Undid last combine.";
     }
 
     private void RemoveComponentGroup(BomGroupViewModel group)
@@ -1117,12 +1312,82 @@ public sealed class MainViewModel : ViewModelBase
         var skippedNote = topSkipped + bottomSkipped > 0
             ? $" ({topSkipped + bottomSkipped} feeder(s) skipped - no saved position on the Settings tab)"
             : "";
-        StatusMessage = $"Wrote {System.IO.Path.GetFileName(topPath)} and {System.IO.Path.GetFileName(bottomPath)}.{skippedNote}";
+
+        // Board outline DXF, same base name/folder as the CSV pair - only when a recognized
+        // Outline layer was actually imported (a board with no outline file, or one left as
+        // Ignore/reassigned to something else, has nothing to export here; that's not an error).
+        var dxfNote = "";
+        if (_outlineLayer is { } outline)
+        {
+            var dxfPath = System.IO.Path.Combine(string.IsNullOrEmpty(directory) ? "." : directory, $"{nameNoExt}_Outline.dxf");
+            try
+            {
+                DxfWriter.WriteOutline(dxfPath, outline);
+                dxfNote = $" Wrote {System.IO.Path.GetFileName(dxfPath)}.";
+            }
+            catch (Exception ex)
+            {
+                dxfNote = $" Failed to write outline DXF: {ex.Message}";
+            }
+        }
+
+        // Tray-feeder STLs - one per DISTINCT (Value, Footprint) pair among components with
+        // "Tray Feeder" checked (not one per component/BOM group - several groups sharing e.g. the
+        // same QFN28 chip would otherwise produce identical, wasteful duplicate trays), skipping
+        // the "(No Match)" sentinel (0x0x0mm - there's no sensible pocket size for an unmatched
+        // footprint). Grouped by Value as well as Footprint (not Footprint alone) specifically so
+        // each tray's engraved label names ONE real part - two different chips that happen to
+        // share a footprint (e.g. two different SOIC-16 ICs) now get their own separate trays
+        // instead of being merged into one ambiguously-labeled tray.
+        var trayNote = "";
+        var trayFeederGroups = Components
+            .Where(c => c.UseTrayFeeder && c.SelectedFootprint.Name != FootprintLibrary.NoMatch.Name)
+            .GroupBy(c => (c.Value, c.SelectedFootprint.Name))
+            .Select(g => g.First())
+            .ToList();
+        if (trayFeederGroups.Count > 0)
+        {
+            var traySettings = TrayStlSettingsStore.Load();
+            var trayCount = 0;
+            foreach (var component in trayFeederGroups)
+            {
+                try
+                {
+                    var mesh = TrayStlGenerator.BuildTray(component.SelectedFootprint, traySettings, component.Value);
+                    var labelPart = string.IsNullOrWhiteSpace(component.Value) ? "" : $"{component.Value}_";
+                    var sanitizedName = string.Join("_", $"{labelPart}{component.SelectedFootprint.Name}".Split(System.IO.Path.GetInvalidFileNameChars()));
+                    var trayPath = System.IO.Path.Combine(string.IsNullOrEmpty(directory) ? "." : directory, $"{nameNoExt}_Tray_{sanitizedName}.stl");
+                    StlWriter.WriteAscii(trayPath, mesh);
+                    trayCount++;
+                }
+                catch (Exception)
+                {
+                    // A single bad footprint (e.g. degenerate dimensions) shouldn't abort the rest
+                    // of the export - the CSVs/DXF already written above are still valid.
+                }
+            }
+            trayNote = trayCount > 0 ? $" Wrote {trayCount} tray STL(s)." : "";
+        }
+
+        StatusMessage = $"Wrote {System.IO.Path.GetFileName(topPath)} and {System.IO.Path.GetFileName(bottomPath)}.{skippedNote}{dxfNote}{trayNote}";
+    }
+
+    /// <summary>True if this component has no feeder assigned yet (let it through - matches the
+    /// real template's own "blank Feeder ID for unassigned" convention) or if its assigned feeder
+    /// resolves to a real physical position on the Settings tab. False for a component assigned
+    /// to a feeder number that's since been deleted (or was never a valid slot) - such a
+    /// component is excluded from the "comp" section entirely, not just from "stack".</summary>
+    private bool HasValidFeederPosition(ComponentViewModel component)
+    {
+        if (component.FeederNumber is not int feederId) return true;
+        return component.UseTrayFeeder
+            ? TrayFeederSettings.Any(t => t.FeederId == feederId)
+            : TapeFeederSettings.Any(f => f.Number == feederId.ToString());
     }
 
     /// <summary>Writes the "stack" section for one board side: one row per distinct feeder number
     /// assigned to a component on that side - low-bank (&lt;50, tape feeders, position from
-    /// <see cref="TapeFeederSettings"/>) and high-bank (&gt;=50, tray feeders, geometry from
+    /// <see cref="TapeFeederSettings"/>) and tray-feeder (&gt;=50, tray feeders, geometry from
     /// <see cref="TrayFeederSettings"/>) use different row layouts, matching the real NeoDen4
     /// template's own "stack,54,1,1,..." vs "stack,1,0,1,..." rows. Returns the number of
     /// assigned feeders that had to be skipped because no matching physical position exists on
@@ -1133,7 +1398,7 @@ public sealed class MainViewModel : ViewModelBase
         var skipped = 0;
 
         var lowBankFeederIds = Components
-            .Where(c => c.Side == side && !c.UseHighFeederBank && c.FeederNumber is not null)
+            .Where(c => c.Side == side && !c.UseTrayFeeder && c.FeederNumber is not null)
             .Select(c => c.FeederNumber!.Value)
             .Distinct()
             .OrderBy(id => id);
@@ -1150,19 +1415,19 @@ public sealed class MainViewModel : ViewModelBase
             lines.Add(BuildLowBankStackRow(feederId, feeder, representative));
         }
 
-        var highBankFeederIds = Components
-            .Where(c => c.Side == side && c.UseHighFeederBank && c.FeederNumber is not null)
+        var trayFeederIds = Components
+            .Where(c => c.Side == side && c.UseTrayFeeder && c.FeederNumber is not null)
             .Select(c => c.FeederNumber!.Value)
             .Distinct()
             .OrderBy(id => id);
 
-        foreach (var feederId in highBankFeederIds)
+        foreach (var feederId in trayFeederIds)
         {
             var tray = TrayFeederSettings.FirstOrDefault(t => t.FeederId == feederId);
             if (tray is null) { skipped++; continue; }
 
             var representative = Components.First(c => c.FeederNumber == feederId);
-            lines.Add(BuildHighBankStackRow(feederId, tray, representative));
+            lines.Add(BuildTrayFeederStackRow(feederId, tray, representative));
         }
 
         var fiducials = side == BoardSide.Top ? TopFiducials : BottomFiducials;
@@ -1172,8 +1437,12 @@ public sealed class MainViewModel : ViewModelBase
         // Only placed components have real coordinates to export - one "comp" row per component
         // (not grouped by feeder, unlike "stack"), in BOM/import order. mirror_create/mirror
         // reference the first one's own position, per explicit instruction; with none placed on
-        // this side, they fall back to 0,0.
-        var placedComponents = Components.Where(c => c.Side == side && c.HasPlacement).ToList();
+        // this side, they fall back to 0,0. A component assigned to a feeder number with no
+        // matching physical position (Settings tab) is excluded too, same as the "stack" section
+        // above - otherwise the file could reference a Feeder ID in a "comp" row that has no
+        // corresponding "stack" row defining where it actually is. A component with no feeder
+        // assigned at all still gets a row (blank Feeder ID), unaffected by this check.
+        var placedComponents = Components.Where(c => c.Side == side && c.HasPlacement && HasValidFeederPosition(c)).ToList();
         var (firstX, firstY) = placedComponents.Count > 0
             ? (MirrorXIfBottomLayersChecked(placedComponents[0].XMm, side), placedComponents[0].YMm)
             : (0, 0);
@@ -1222,14 +1491,14 @@ public sealed class MainViewModel : ViewModelBase
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
 
-    /// <summary>High-bank (tray) feeder row - built from the exact pattern the user supplied,
+    /// <summary>Tray-feeder row - built from the exact pattern the user supplied,
     /// with the tray's geometry (<see cref="TrayFeederSettingViewModel"/>) filling the columns
     /// that turned out (once the pattern was given) to encode Columns/Rows/EndX/EndY, not the
     /// mystery values they first looked like from a real example row alone. Footprint/Value are
     /// populated from the assigned component the same way <see cref="BuildLowBankStackRow"/>
     /// does - the pattern's own example happened to show these blank, but the user asked
     /// afterward for them to be filled in here too, matching the low-bank behavior.</summary>
-    private static string BuildHighBankStackRow(int feederId, TrayFeederSettingViewModel tray, ComponentViewModel representative)
+    private static string BuildTrayFeederStackRow(int feederId, TrayFeederSettingViewModel tray, ComponentViewModel representative)
     {
         var placeHeightMm = representative.SelectedFootprint.HeightMm + 1.7;
 
@@ -1268,9 +1537,11 @@ public sealed class MainViewModel : ViewModelBase
     /// (Value, Footprint) so parts sharing one physical reel share one feeder number - matching
     /// how the NeoDen4 template's own "stack" (feeder) table works, where many placements
     /// reference the same Feeder ID. Unchecked groups pull from the low bank (1-40); groups
-    /// where any member has <see cref="ComponentViewModel.UseHighFeederBank"/> checked pull from
-    /// the high bank (54-99) instead, and every member of the group is synced to that same
-    /// checkbox state and feeder number.</summary>
+    /// where any member has <see cref="ComponentViewModel.UseTrayFeeder"/> checked pull from
+    /// the tray-feeder bank (54-99) instead, and every member of the group is synced to that same
+    /// checkbox state and feeder number. Only numbers with a real physical position on the
+    /// Settings tab are ever handed out - see the <c>validLowNumbers</c>/<c>validHighNumbers</c>
+    /// lists below.</summary>
     private void AutoAssignFeeders()
     {
         const int lowStart = 1, lowEnd = 40;
@@ -1284,8 +1555,25 @@ public sealed class MainViewModel : ViewModelBase
 
         var groups = Components.GroupBy(c => (Value: c.Value ?? "", Footprint: c.FootprintText ?? "")).ToList();
 
-        var nextLow = lowStart;
-        var nextHigh = highStart;
+        // Walk only feeder numbers that actually have a row in TapeFeederSettings/
+        // TrayFeederSettings - previously this just incremented a raw integer counter through the
+        // whole 1-40/54-99 range, which could (and, once feeders became deletable, reliably did)
+        // hand out numbers with no physical position at all. Skipping straight to the next VALID
+        // number, rather than the next integer, is what actually fixes that.
+        var validLowNumbers = TapeFeederSettings
+            .Select(f => int.TryParse(f.Number, out var n) ? n : (int?)null)
+            .Where(n => n is >= lowStart and <= lowEnd)
+            .Select(n => n!.Value)
+            .OrderBy(n => n)
+            .ToList();
+        var validHighNumbers = TrayFeederSettings
+            .Select(f => f.FeederId)
+            .Where(id => id is >= highStart and <= highEnd)
+            .OrderBy(id => id)
+            .ToList();
+
+        var nextLowIndex = 0;
+        var nextHighIndex = 0;
         var skippedGroups = 0;
 
         // Clear stale feeder labels/images before reassigning, so a feeder that no longer gets a
@@ -1300,42 +1588,39 @@ public sealed class MainViewModel : ViewModelBase
 
         foreach (var group in groups)
         {
-            var useHighBank = group.Any(c => c.UseHighFeederBank);
+            var useTrayFeeder = group.Any(c => c.UseTrayFeeder);
             int assigned;
 
-            if (useHighBank)
+            if (useTrayFeeder)
             {
-                if (nextHigh > highEnd) { skippedGroups++; continue; }
-                assigned = nextHigh++;
+                if (nextHighIndex >= validHighNumbers.Count) { skippedGroups++; continue; }
+                assigned = validHighNumbers[nextHighIndex++];
 
                 // Draw the assigned part's to-scale footprint at the tray's start (BeginX,
-                // BeginY) and its Value on the center label - only for feeder numbers that
-                // correspond to an actual tray slot in TrayFeederSettings, mirroring the
-                // low-bank image below.
-                var tray = TrayFeederSettings.FirstOrDefault(f => f.FeederId == assigned);
-                tray?.SetAssignedComponent(group.Key.Value, group.First().SelectedFootprint);
+                // BeginY) and its Value on the center label.
+                var tray = TrayFeederSettings.First(f => f.FeederId == assigned);
+                tray.SetAssignedComponent(group.Key.Value, group.First().SelectedFootprint);
             }
             else
             {
-                if (nextLow > lowEnd) { skippedGroups++; continue; }
-                assigned = nextLow++;
+                if (nextLowIndex >= validLowNumbers.Count) { skippedGroups++; continue; }
+                assigned = validLowNumbers[nextLowIndex++];
 
                 // Show the assigned part's name/footprint next to the feeder's number and draw
-                // its to-scale footprint at the feeder's X-mark spot - only for feeder numbers
-                // that correspond to an actual physical feeder slot in TapeFeederSettings.
-                var feeder = TapeFeederSettings.FirstOrDefault(f => f.Number == assigned.ToString());
-                feeder?.SetAssignedComponent($"{group.Key.Value}\n{group.Key.Footprint}", group.First().SelectedFootprint);
+                // its to-scale footprint at the feeder's X-mark spot.
+                var feeder = TapeFeederSettings.First(f => f.Number == assigned.ToString());
+                feeder.SetAssignedComponent($"{group.Key.Value}\n{group.Key.Footprint}", group.First().SelectedFootprint);
             }
 
             foreach (var component in group)
             {
-                component.UseHighFeederBank = useHighBank;
+                component.UseTrayFeeder = useTrayFeeder;
                 component.FeederNumber = assigned;
             }
         }
 
         StatusMessage = skippedGroups > 0
-            ? $"Assigned feeders to {groups.Count - skippedGroups} of {groups.Count} unique part(s) - ran out of feeder slots for the rest."
+            ? $"Assigned feeders to {groups.Count - skippedGroups} of {groups.Count} unique part(s) - ran out of valid feeder slots for the rest."
             : $"Assigned feeders to {groups.Count} unique part(s) across {Components.Count} component(s).";
 
         // GenerateNeoDenCsvCommand's CanExecute depends on whether any FeederNumber is set -

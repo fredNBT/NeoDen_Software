@@ -17,9 +17,12 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Grid.Column="0" Text="X (mm):" VerticalAlignment="Center" Margin="0,0,8,8"/>
-            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BoardOriginX, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+            <!-- No UpdateSourceTrigger=PropertyChanged - see the matching comment in
+                 FootprintLibraryWindow.xaml for why that eats decimal points on a double-typed
+                 property. LostFocus (the default) commits the full typed string in one shot. -->
+            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BoardOriginX}" Margin="0,0,0,8"/>
             <TextBlock Grid.Row="1" Grid.Column="0" Text="Y (mm):" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BoardOriginY, UpdateSourceTrigger=PropertyChanged}"/>
+            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BoardOriginY}"/>
         </Grid>
         <TextBlock TextWrapping="Wrap" Foreground="Gray" FontStyle="Italic" Margin="0,12,0,12"
                    Text="Takes effect on the next Gerber import - it doesn't move a board already on screen."/>

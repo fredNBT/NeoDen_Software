@@ -46,8 +46,14 @@ public partial class MainWindow : Window
             FixturesHost.Children.Add(fixture);
         foreach (var feeder in _viewModel.TapeFeederSettings)
             FixturesHost.Children.Add(feeder.Visual);
+        // Subscribed *after* the initial population above (mirrors Layers_CollectionChanged's own
+        // ordering) - TapeFeederSettings can grow/shrink later via "+ Add"/"Remove" on the
+        // Settings tab, so newly added/removed feeders need their Visual kept in sync with
+        // FixturesHost for the rest of the session, not just at startup.
+        _viewModel.TapeFeederSettings.CollectionChanged += TapeFeederSettings_CollectionChanged;
         foreach (var tray in _viewModel.TrayFeederSettings)
             FixturesHost.Children.Add(tray.Visual);
+        _viewModel.TrayFeederSettings.CollectionChanged += TrayFeederSettings_CollectionChanged;
 
         ViewportBorder.Background = GerberRenderer.CanvasBackground;
         UpdateTransform();
@@ -70,6 +76,18 @@ public partial class MainWindow : Window
         MainTabControl.SelectedItem = SettingsTabItem;
     }
 
+    private void TrayStlGeneratorSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new TrayStlSettingsWindow(new TrayStlSettingsViewModel()) { Owner = this };
+        window.ShowDialog();
+    }
+
+    private void Appearance_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new AppearanceSettingsWindow(new AppearanceSettingsViewModel()) { Owner = this };
+        window.ShowDialog();
+    }
+
     private void BoardOrigin_Click(object sender, RoutedEventArgs e)
     {
         var window = new BoardOriginWindow { Owner = this, DataContext = _viewModel };
@@ -78,7 +96,7 @@ public partial class MainWindow : Window
 
     // Runs before AutoAssignFeedersCommand/GenerateNeoDenCsvCommand (Button.OnClick raises the
     // Click event before executing the bound Command) - forces any pending DataGrid edit (a
-    // Feeder number just typed, a High Bank box just checked) to commit to the underlying
+    // Feeder number just typed, a Tray Feeder box just checked) to commit to the underlying
     // ComponentViewModel first. Without this, clicking straight from an edit-in-progress cell
     // into one of these buttons - without Tab/Enter/clicking elsewhere first - can leave the
     // typed value sitting in the edit control, unread by the command that fires right after.
@@ -86,6 +104,29 @@ public partial class MainWindow : Window
     {
         FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Cell, true);
         FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Row, true);
+    }
+
+    private void CombineSelectedGroups_Click(object sender, RoutedEventArgs e)
+    {
+        CommitFeederSetupEdits_Click(sender, e);
+        var selected = FeederSetupDataGrid.SelectedItems.Cast<BomGroupViewModel>().ToList();
+        _viewModel.CombineGroups(selected);
+    }
+
+    private void UndoCombine_Click(object sender, RoutedEventArgs e) => _viewModel.UndoCombine();
+
+    /// <summary>WPF's default DataGridRow behavior treats a right-click like a left-click for
+    /// selection purposes - right-clicking any one row of an existing Ctrl/Shift multi-selection
+    /// would otherwise collapse it down to just that row before the context menu even opens,
+    /// silently breaking "select several rows, right-click, Combine". Right-clicking a row that's
+    /// already part of the current selection now leaves the whole selection alone; right-clicking
+    /// outside it collapses to just that row, matching Explorer/Excel-style context-menu behavior.</summary>
+    private void FeederRow_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DataGridRow row || row.IsSelected) return;
+
+        FeederSetupDataGrid.SelectedItems.Clear();
+        row.IsSelected = true;
     }
 
     // Same uncommitted-edit class of bug as CommitFeederSetupEdits_Click above, but for the
@@ -200,11 +241,18 @@ public partial class MainWindow : Window
         vm.AddRequired("Y Position", columns, guess.YColumn);
         vm.AddOptional("Rotation", columns, guess.RotationColumn);
         vm.AddOptional("Layer/Side", columns, guess.SideColumn);
+        // Always unchecked by default (guess.InvertY is never auto-suggested - see
+        // PnpImportService.ReadHeader's comment: whether a file's raw Y values are mostly negative
+        // turned out NOT to reliably mean its Y axis needs flipping, since a board's own native
+        // Gerber coordinates can themselves be negative). Shown so the user has an escape hatch if
+        // they genuinely do hit a tool whose PnP export inverts Y relative to its own Gerbers.
+        vm.AddToggle("Invert Y axis", guess.InvertY,
+            "Some EDA tools report Y with the opposite sign from their own Gerber output. Only check this if imported components land off the board in a way that flipping Y would fix - most files, including most KiCad exports, do not need this.");
 
         var dialog = new ColumnMappingDialog(vm) { Owner = this };
         if (dialog.ShowDialog() != true) return null;
 
-        return new PnpColumnMapping(vm.Get("Designator"), vm.Get("X Position"), vm.Get("Y Position"), vm.Get("Rotation"), vm.Get("Layer/Side"));
+        return new PnpColumnMapping(vm.Get("Designator"), vm.Get("X Position"), vm.Get("Y Position"), vm.Get("Rotation"), vm.Get("Layer/Side"), vm.GetToggle("Invert Y axis"));
     }
 
     private void Layers_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -225,6 +273,36 @@ public partial class MainWindow : Window
         {
             foreach (LayerViewModel layer in e.NewItems)
                 LayerHost.Children.Add(layer.Visual);
+        }
+    }
+
+    private void TapeFeederSettings_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (TapeFeederSettingViewModel feeder in e.OldItems)
+                FixturesHost.Children.Remove(feeder.Visual);
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (TapeFeederSettingViewModel feeder in e.NewItems)
+                FixturesHost.Children.Add(feeder.Visual);
+        }
+    }
+
+    private void TrayFeederSettings_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (TrayFeederSettingViewModel tray in e.OldItems)
+                FixturesHost.Children.Remove(tray.Visual);
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (TrayFeederSettingViewModel tray in e.NewItems)
+                FixturesHost.Children.Add(tray.Visual);
         }
     }
 
@@ -299,10 +377,23 @@ public partial class MainWindow : Window
     // pick-mode regardless of which control currently has focus.
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Escape || _viewModel.PendingFiducialPick is null) return;
+        if (e.Key == Key.Escape && _viewModel.PendingFiducialPick is not null)
+        {
+            _viewModel.PendingFiducialPick = null;
+            e.Handled = true;
+            return;
+        }
 
-        _viewModel.PendingFiducialPick = null;
-        e.Handled = true;
+        // Only intercepts Ctrl+Z when there's actually a combine to undo, so it doesn't steal a
+        // TextBox's own native text-undo (e.g. mid-edit in the Feeder Setup grid's Feeder column)
+        // when there's nothing of ours to restore.
+        if (e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control && _viewModel.CanUndoCombine)
+        {
+            FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+            FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            _viewModel.UndoCombine();
+            e.Handled = true;
+        }
     }
 
     private void ViewportBorder_KeyDown(object sender, KeyEventArgs e)

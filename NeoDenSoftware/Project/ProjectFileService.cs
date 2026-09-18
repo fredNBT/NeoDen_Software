@@ -44,6 +44,7 @@ public static class ProjectFileService
             lines.Add(Join("pnpcolumn", "Y", data.PnpMapping.YColumn ?? ""));
             lines.Add(Join("pnpcolumn", "Rotation", data.PnpMapping.RotationColumn ?? ""));
             lines.Add(Join("pnpcolumn", "Side", data.PnpMapping.SideColumn ?? ""));
+            lines.Add(Join("pnpcolumn", "InvertY", data.PnpMapping.InvertY.ToString()));
         }
 
         foreach (var c in data.Components)
@@ -51,7 +52,7 @@ public static class ProjectFileService
             lines.Add(Join("component", c.Designator, c.FootprintName,
                 c.RotationDegrees.ToString("0.####", CultureInfo.InvariantCulture),
                 c.FeederNumber?.ToString(CultureInfo.InvariantCulture) ?? "",
-                c.UseHighFeederBank.ToString()));
+                c.UseTrayFeeder.ToString()));
         }
 
         foreach (var f in data.Fiducials)
@@ -85,7 +86,7 @@ public static class ProjectFileService
                 r[2],
                 ParseDouble(r[3]),
                 string.IsNullOrEmpty(r[4]) ? null : int.Parse(r[4], CultureInfo.InvariantCulture),
-                bool.TryParse(r[5], out var high) && high))
+                bool.TryParse(r[5], out var tray) && tray))
             .ToList();
 
         var fiducials = rows
@@ -109,7 +110,8 @@ public static class ProjectFileService
             ParseDouble(Meta("PcbThicknessMm") ?? "1.6"),
             bool.TryParse(Meta("MirrorBottomLayers"), out var mirror) && mirror,
             new BomColumnMapping(BomColumn("Designator"), BomColumn("Value"), BomColumn("Footprint")),
-            new PnpColumnMapping(PnpColumn("Designator"), PnpColumn("X"), PnpColumn("Y"), PnpColumn("Rotation"), PnpColumn("Side")),
+            new PnpColumnMapping(PnpColumn("Designator"), PnpColumn("X"), PnpColumn("Y"), PnpColumn("Rotation"), PnpColumn("Side"),
+                bool.TryParse(PnpColumn("InvertY"), out var invertY) && invertY),
             components,
             fiducials,
             layerRoles);

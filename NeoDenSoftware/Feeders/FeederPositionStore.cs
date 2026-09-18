@@ -29,20 +29,23 @@ public static class FeederPositionStore
     // Tray entries are keyed by FeederId.ToString() rather than a raw int, since JSON object keys
     // must be strings - System.Text.Json won't serialize a Dictionary<int,_> as an object without
     // extra configuration.
-    private sealed record StoreData(Dictionary<string, TapeFeederXY>? Tape, Dictionary<string, TrayFeederPosition>? Tray);
+    private sealed record StoreData(
+        Dictionary<string, TapeFeederXY>? Tape,
+        Dictionary<string, TrayFeederPosition>? Tray,
+        HashSet<string>? DeletedTapeDefaults);
 
     private static StoreData LoadRaw()
     {
-        if (!File.Exists(FilePath)) return new StoreData(null, null);
+        if (!File.Exists(FilePath)) return new StoreData(null, null, null);
         try
         {
-            return JsonSerializer.Deserialize<StoreData>(File.ReadAllText(FilePath)) ?? new StoreData(null, null);
+            return JsonSerializer.Deserialize<StoreData>(File.ReadAllText(FilePath)) ?? new StoreData(null, null, null);
         }
         catch (Exception)
         {
             // A corrupt/unreadable file shouldn't prevent the app from starting - it just means
             // every feeder falls back to its hardcoded default position this session.
-            return new StoreData(null, null);
+            return new StoreData(null, null, null);
         }
     }
 
@@ -76,6 +79,48 @@ public static class FeederPositionStore
         var tray = data.Tray is null ? new Dictionary<string, TrayFeederPosition>() : new Dictionary<string, TrayFeederPosition>(data.Tray);
         tray[position.FeederId.ToString()] = position;
         WriteAll(data with { Tray = tray });
+    }
+
+    /// <summary>Called when a user-added tape feeder (one with no corresponding entry in
+    /// <see cref="TapeFeederLibrary.Defaults"/>) is removed from the Settings tab - without this,
+    /// the deleted number's last-saved position would linger in the file and silently get reused
+    /// if a later "+ Add" ever lands on that same auto-assigned number again. Harmless no-op for a
+    /// number that was never saved (e.g. removing a just-added, never-edited feeder).</summary>
+    public static void DeleteTapeFeeder(string number)
+    {
+        var data = LoadRaw();
+        if (data.Tape is null || !data.Tape.ContainsKey(number)) return;
+        var tape = new Dictionary<string, TapeFeederXY>(data.Tape);
+        tape.Remove(number);
+        WriteAll(data with { Tape = tape });
+    }
+
+    /// <summary>Same as <see cref="DeleteTapeFeeder"/> but for a user-added tray feeder.</summary>
+    public static void DeleteTrayFeeder(int feederId)
+    {
+        var data = LoadRaw();
+        var key = feederId.ToString();
+        if (data.Tray is null || !data.Tray.ContainsKey(key)) return;
+        var tray = new Dictionary<string, TrayFeederPosition>(data.Tray);
+        tray.Remove(key);
+        WriteAll(data with { Tray = tray });
+    }
+
+    /// <summary>Tape feeder numbers ("1", "21", ...) the user has deleted even though they're one
+    /// of <see cref="TapeFeederLibrary.Defaults"/> - <c>MainViewModel.BuildTapeFeederSettings</c>
+    /// checks this and skips recreating any number listed here, since otherwise the hardcoded
+    /// default list would silently resurrect a deleted feeder on every restart.</summary>
+    public static IReadOnlySet<string> LoadDeletedTapeDefaults() =>
+        LoadRaw().DeletedTapeDefaults ?? new HashSet<string>();
+
+    /// <summary>Called when the user deletes one of the hardcoded default tape feeders (as
+    /// opposed to one they added themselves, which just uses <see cref="DeleteTapeFeeder"/>).</summary>
+    public static void MarkTapeDefaultDeleted(string number)
+    {
+        var data = LoadRaw();
+        var deleted = data.DeletedTapeDefaults is null ? new HashSet<string>() : new HashSet<string>(data.DeletedTapeDefaults);
+        deleted.Add(number);
+        WriteAll(data with { DeletedTapeDefaults = deleted });
     }
 
     private static void WriteAll(StoreData data)

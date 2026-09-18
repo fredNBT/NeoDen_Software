@@ -25,7 +25,7 @@ public sealed class ComponentViewModel : ViewModelBase
     private FootprintDefinition _selectedFootprint;
     private double _rotationDegrees;
     private int? _feederNumber;
-    private bool _useHighFeederBank;
+    private bool _useTrayFeeder;
 
     public string Designator { get; }
     public string? Value { get; }
@@ -46,12 +46,13 @@ public sealed class ComponentViewModel : ViewModelBase
         set => SetField(ref _feederNumber, value);
     }
 
-    /// <summary>When checked, auto-assign pulls this part's feeder number from the high bank
-    /// (54-99) instead of the default bank (1-40) - e.g. for tray/large-component feeders.</summary>
-    public bool UseHighFeederBank
+    /// <summary>When checked, auto-assign pulls this part's feeder number from the tray-feeder
+    /// bank (54-99) instead of the default tape-feeder bank (1-40) - e.g. for tray/large-component
+    /// feeders.</summary>
+    public bool UseTrayFeeder
     {
-        get => _useHighFeederBank;
-        set => SetField(ref _useHighFeederBank, value);
+        get => _useTrayFeeder;
+        set => SetField(ref _useTrayFeeder, value);
     }
 
     public double RotationDegrees

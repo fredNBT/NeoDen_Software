@@ -23,5 +23,16 @@ public partial class FootprintLibraryWindow : Window
             ((FootprintLibraryViewModel)DataContext).NewImagePath = dialog.FileName;
     }
 
+    private void UploadStl_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose Footprint STL",
+            Filter = "STL files (*.stl)|*.stl|All files (*.*)|*.*",
+        };
+        if (dialog.ShowDialog(this) == true)
+            ((FootprintLibraryViewModel)DataContext).SetStlPath(dialog.FileName);
+    }
+
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

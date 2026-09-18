@@ -27,3 +27,11 @@ C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Vi
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\FootprintLibraryWindow.g.cs
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\BoardOriginWindow.baml
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\BoardOriginWindow.g.cs
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\NeoDenSoftware.sourcelink.json
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\TrayStlSettingsWindow.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\TrayStlSettingsWindow.g.cs
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\BenchLight.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\CopperFlux.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\FabFloor.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.g.cs

@@ -26,8 +26,16 @@ public sealed class TapeFeederSettingViewModel : ViewModelBase
     public string Number { get; }
     public Canvas Visual { get; }
 
+    /// <summary>True for one of the original <see cref="Feeders.TapeFeederLibrary.Defaults"/>
+    /// slots, false for a feeder the user added via "+ Add" (Settings tab). Every feeder can be
+    /// removed - this only affects *how* removal is persisted: deleting a default one has to be
+    /// remembered as a tombstone (<see cref="FeederPositionStore.MarkTapeDefaultDeleted"/>, since
+    /// the hardcoded default list would otherwise resurrect it on the next restart), while
+    /// deleting an added one just drops its saved override.</summary>
+    public bool IsDefault { get; }
+
     /// <summary>Value/footprint text of whatever part Auto-Assign Feeders last put on this
-    /// feeder, shown next to the feeder number - empty for an unassigned or high-bank feeder.</summary>
+    /// feeder, shown next to the feeder number - empty for an unassigned or tray-feeder part.</summary>
     public string ComponentLabel
     {
         get => _componentLabel;
@@ -67,9 +75,10 @@ public sealed class TapeFeederSettingViewModel : ViewModelBase
         }
     }
 
-    public TapeFeederSettingViewModel(string number, TapeFeederXY initial)
+    public TapeFeederSettingViewModel(string number, TapeFeederXY initial, bool isDefault = false)
     {
         Number = number;
+        IsDefault = isDefault;
         _x = initial.X;
         _y = initial.Y;
         _angle = initial.Angle;

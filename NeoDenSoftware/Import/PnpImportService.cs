@@ -30,6 +30,14 @@ public sealed partial class PnpImportService
         var unitToMm = DetectUnitToMm(lines.Take(headerIndex));
         var header = CsvParser.ParseLine(lines[headerIndex]);
 
+        // InvertY always defaults to false here - NOT auto-suggested from whether this file's raw
+        // Y values happen to be mostly negative. That looked like a reasonable signal at first
+        // (real KiCad export, ~100% negative Y) but turned out to be a false one: a board's own
+        // native (pre-shift) Gerber coordinates can themselves be negative depending on where the
+        // design sits on the sheet, and this exact file's Gerbers ARE negative-Y too - so the raw
+        // PnP file and its own Gerbers already agreed with each other, and "correcting" the sign
+        // actively broke a working import (every component landed off the board instead of on
+        // it). The user stays in control via the checkbox in the mapping dialog instead.
         var guess = new PnpColumnMapping(
             ColumnNameAt(header, CsvParser.FindColumn(header, DesignatorNames)),
             ColumnNameAt(header, CsvParser.FindColumn(header, XNames)),
@@ -72,8 +80,9 @@ public sealed partial class PnpImportService
                 ? r
                 : 0.0;
             var side = sideCol >= 0 && sideCol < fields.Length ? ParseSide(fields[sideCol]) : BoardSide.Top;
+            var signedY = mapping.InvertY ? -y : y;
 
-            entries.Add(new PnpEntry(fields[designatorCol].Trim(), x * unitToMm, y * unitToMm, rotation, side));
+            entries.Add(new PnpEntry(fields[designatorCol].Trim(), x * unitToMm, signedY * unitToMm, rotation, side));
         }
 
         return entries;

@@ -43,6 +43,11 @@ public sealed class TrayFeederSettingViewModel : ViewModelBase
     public int FeederId { get; }
     public Canvas Visual { get; } = new() { IsHitTestVisible = false };
 
+    /// <summary>True for a tray the user added via "+ Add" (Settings tab) - false for one of the
+    /// original <see cref="Feeders.TrayFeederLibrary.Defaults"/> slots, which can be repositioned
+    /// but never removed entirely, same convention as <see cref="TapeFeederSettingViewModel.IsRemovable"/>.</summary>
+    public bool IsRemovable { get; }
+
     public double BeginX
     {
         get => _beginX;
@@ -97,9 +102,10 @@ public sealed class TrayFeederSettingViewModel : ViewModelBase
         }
     }
 
-    public TrayFeederSettingViewModel(TrayFeederPosition position)
+    public TrayFeederSettingViewModel(TrayFeederPosition position, bool isRemovable = false)
     {
         FeederId = position.FeederId;
+        IsRemovable = isRemovable;
         _beginX = position.BeginX;
         _beginY = position.BeginY;
         _endX = position.EndX;

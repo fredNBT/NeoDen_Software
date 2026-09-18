@@ -122,8 +122,22 @@ public sealed partial class GerberParser
                 .Select(p => double.TryParse(p, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0.0)
                 .ToArray();
 
-        var widthMm = parameters.Length > 0 ? parameters[0] * state.UnitToMm : DefaultApertureSizeMm;
-        var heightMm = parameters.Length > 1 ? parameters[1] * state.UnitToMm : widthMm;
+        // Only a real C(ircle)/R(ectangle)/O(bround) aperture's own parameters are actually a
+        // size - a macro-referencing aperture (shapeToken is a macro NAME, e.g. "RoundRect" or
+        // "FreePoly0") falls back to a circular pad, but its parameters are whatever that specific
+        // macro defines them to mean, which is NOT reliably "a diameter". Real-world repro that
+        // motivated this: KiCad emits "%ADD41FreePoly0,270.000000*%" for a free-polygon aperture,
+        // where 270 is a ROTATION ANGLE IN DEGREES, not a size - trusting parameters[0] here
+        // produced a fake 270mm-diameter pad, ballooning that layer's bounds by 100+mm and, since
+        // the whole board's Gerber-to-PnP alignment is derived from the union of every layer's
+        // bounds, silently shifting every placed component off the board. Fall back to the same
+        // small default used when an aperture has no parameters at all - "a Gerber file's
+        // vertex/segment shapes are correct even for unsupported macros, only the exact pad
+        // silhouette they draw isn't" is an acceptable simplification here; a wildly wrong bound
+        // that corrupts the whole board's coordinate alignment is not.
+        var isKnownShape = shapeToken.ToUpperInvariant() is "C" or "R" or "O";
+        var widthMm = isKnownShape && parameters.Length > 0 ? parameters[0] * state.UnitToMm : DefaultApertureSizeMm;
+        var heightMm = isKnownShape && parameters.Length > 1 ? parameters[1] * state.UnitToMm : widthMm;
 
         var shape = shapeToken.ToUpperInvariant() switch
         {

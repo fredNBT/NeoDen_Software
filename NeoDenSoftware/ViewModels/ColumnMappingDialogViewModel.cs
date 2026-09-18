@@ -9,6 +9,12 @@ public sealed class ColumnMappingDialogViewModel : ViewModelBase
     public required string Title { get; init; }
     public required string Description { get; init; }
     public ObservableCollection<ColumnMappingFieldViewModel> Fields { get; } = [];
+    public ObservableCollection<ColumnMappingToggleViewModel> Toggles { get; } = [];
+
+    public void AddToggle(string label, bool defaultValue, string? tooltip = null) =>
+        Toggles.Add(new ColumnMappingToggleViewModel { Label = label, Tooltip = tooltip, IsChecked = defaultValue });
+
+    public bool GetToggle(string label) => Toggles.First(t => t.Label == label).IsChecked;
 
     public void AddRequired(string fieldName, IReadOnlyList<string> columns, string? guess) =>
         Fields.Add(new ColumnMappingFieldViewModel

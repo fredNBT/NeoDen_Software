@@ -10,6 +10,13 @@
             <Button Content="Continue" Width="90" IsDefault="True" Click="Continue_Click"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Bottom" Text="* required" FontStyle="Italic" Foreground="Gray" Margin="0,4,0,0"/>
+        <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding Toggles}" Margin="0,8,0,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked}" ToolTip="{Binding Tooltip}" Margin="0,4"/>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
         <ItemsControl ItemsSource="{Binding Fields}">
             <ItemsControl.ItemTemplate>
                 <DataTemplate>

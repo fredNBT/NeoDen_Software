@@ -77,6 +77,20 @@ public static class FootprintLibrary
         return footprint;
     }
 
+    /// <summary>Same as <see cref="AddCustom"/>, but the footprint's image is a top-down render
+    /// baked once from an uploaded STL model rather than a photo the user picked directly - see
+    /// <see cref="CustomFootprintStore.AddFootprintFromStl"/>. Everywhere else in the app that
+    /// draws a footprint (board view, BOM thumbnails, feeder previews) only ever looks at the
+    /// resulting <see cref="FootprintDefinition.ImagePath"/>, so nothing downstream needs to know
+    /// this one came from an STL.</summary>
+    public static FootprintDefinition AddCustomFromStl(string name, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, string sourceStlPath)
+    {
+        var footprint = CustomFootprintStore.AddFootprintFromStl(name, aliases, lengthMm, widthMm, heightMm, sourceStlPath);
+        All.Add(footprint);
+        AllWithNoMatch.Add(footprint);
+        return footprint;
+    }
+
     /// <summary>Updates an existing custom footprint's name/dimensions (and optionally its image),
     /// persists the change, and replaces it in place in both live collections - an
     /// <see cref="ObservableCollection{T}"/> indexer assignment raises a Replace notification, so
@@ -88,13 +102,45 @@ public static class FootprintLibrary
     public static FootprintDefinition UpdateCustom(FootprintDefinition existing, string name, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, string? newSourceImagePath)
     {
         var updated = CustomFootprintStore.UpdateFootprint(existing.Name, name, aliases, lengthMm, widthMm, heightMm, newSourceImagePath);
+        ReplaceInLiveCollections(existing, updated);
+        return updated;
+    }
 
+    /// <summary>Same as <see cref="UpdateCustom"/>, but replacing the footprint's image with a
+    /// fresh render from a newly uploaded STL - see <see cref="CustomFootprintStore.UpdateFootprintFromStl"/>.</summary>
+    public static FootprintDefinition UpdateCustomFromStl(FootprintDefinition existing, string name, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, string newSourceStlPath)
+    {
+        var updated = CustomFootprintStore.UpdateFootprintFromStl(existing.Name, name, aliases, lengthMm, widthMm, heightMm, newSourceStlPath);
+        ReplaceInLiveCollections(existing, updated);
+        return updated;
+    }
+
+    /// <summary>Adds a new user-defined footprint with no image or STL - it renders as a
+    /// procedural placeholder outline (from <paramref name="shapeKind"/> and L/W/H), exactly like
+    /// a built-in library entry - see <see cref="CustomFootprintStore.AddFootprintProcedural"/>.</summary>
+    public static FootprintDefinition AddCustomProcedural(string name, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, FootprintShapeKind shapeKind)
+    {
+        var footprint = CustomFootprintStore.AddFootprintProcedural(name, aliases, lengthMm, widthMm, heightMm, shapeKind);
+        All.Add(footprint);
+        AllWithNoMatch.Add(footprint);
+        return footprint;
+    }
+
+    /// <summary>Same as <see cref="UpdateCustom"/>, but leaving (or reverting to) no image/STL -
+    /// see <see cref="CustomFootprintStore.UpdateFootprintProcedural"/>.</summary>
+    public static FootprintDefinition UpdateCustomProcedural(FootprintDefinition existing, string name, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, FootprintShapeKind shapeKind)
+    {
+        var updated = CustomFootprintStore.UpdateFootprintProcedural(existing.Name, name, aliases, lengthMm, widthMm, heightMm, shapeKind);
+        ReplaceInLiveCollections(existing, updated);
+        return updated;
+    }
+
+    private static void ReplaceInLiveCollections(FootprintDefinition existing, FootprintDefinition updated)
+    {
         var indexInAll = All.IndexOf(existing);
         if (indexInAll >= 0) All[indexInAll] = updated;
 
         var indexInAllWithNoMatch = AllWithNoMatch.IndexOf(existing);
         if (indexInAllWithNoMatch >= 0) AllWithNoMatch[indexInAllWithNoMatch] = updated;
-
-        return updated;
     }
 }

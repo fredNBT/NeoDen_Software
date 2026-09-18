@@ -1,0 +1,452 @@
+<title>Three Palette Concepts</title>
+<meta name="description" content="Three color-and-type directions for the NeoDen Gerber Viewer app chrome, mocked up on its real layout.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+  :root{
+    --page-bg:#F6F7F5;
+    --page-panel:#FFFFFF;
+    --page-ink:#1B1F1D;
+    --page-muted:#5B655F;
+    --page-border:#E1E4E0;
+    --page-accent:#2E7D5B;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --page-bg:#14161A;
+      --page-panel:#1B1E22;
+      --page-ink:#E7E9E6;
+      --page-muted:#9AA39C;
+      --page-border:#2A2E32;
+      --page-accent:#57C293;
+    }
+  }
+  :root[data-theme="dark"]{
+    --page-bg:#14161A;
+    --page-panel:#1B1E22;
+    --page-ink:#E7E9E6;
+    --page-muted:#9AA39C;
+    --page-border:#2A2E32;
+    --page-accent:#57C293;
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--page-bg);
+    color:var(--page-ink);
+    font-family:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+    padding: 40px 20px 56px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width: 1080px; margin: 0 auto; }
+
+  header.page-head{ margin-bottom: 48px; max-width:70ch; }
+  header.page-head .eyebrow{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:11.5px;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    color:var(--page-accent);
+    margin:0 0 12px;
+  }
+  header.page-head h1{
+    font-size: clamp(24px,4vw,32px);
+    line-height:1.2;
+    margin:0 0 12px;
+    text-wrap:balance;
+    font-weight:600;
+  }
+  header.page-head p{
+    color:var(--page-muted);
+    line-height:1.6;
+    margin:0;
+    font-size:15px;
+  }
+
+  .concept{ margin-bottom: 60px; }
+  .concept:last-child{ margin-bottom: 8px; }
+  .concept-head{ margin-bottom:16px; }
+  .concept-head .tag{
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:11.5px;
+    color:var(--page-accent);
+    letter-spacing:.04em;
+  }
+  .concept-head h2{
+    font-size:19px;
+    margin:4px 0 6px;
+    font-weight:600;
+  }
+  .concept-head p.rationale{
+    margin:0;
+    color:var(--page-muted);
+    font-size:14px;
+    line-height:1.55;
+    max-width:72ch;
+  }
+
+  /* ---------- shared app-mock shell ---------- */
+  .app-mock{
+    border-radius:9px;
+    overflow:hidden;
+    border:1px solid var(--mk-border);
+    box-shadow: 0 20px 44px -24px rgba(0,0,0,.4);
+    background:var(--mk-app-bg);
+    color:var(--mk-ink);
+    font-family:'IBM Plex Sans',system-ui,sans-serif;
+  }
+  .mk-titlebar{
+    display:flex; align-items:center; gap:9px;
+    padding:8px 12px;
+    background:var(--mk-titlebar-bg);
+    border-bottom:1px solid var(--mk-border);
+    font-size:12.5px;
+    font-weight:600;
+  }
+  .mk-titlebar .dot{ width:8px;height:8px;border-radius:50%; background:var(--mk-icon); flex:none; }
+  .mk-titlebar .win-dots{ margin-left:auto; display:flex; gap:5px; }
+  .mk-titlebar .win-dots i{ width:8px;height:8px;border-radius:50%; background:var(--mk-muted); opacity:.5; display:block; }
+
+  .mk-menubar{
+    display:flex; gap:18px;
+    padding:6px 14px;
+    background:var(--mk-app-bg);
+    border-bottom:1px solid var(--mk-border);
+    font-size:12px;
+  }
+  .mk-menubar span{ color:var(--mk-muted); }
+  .mk-menubar span.active{ color:var(--mk-ink); font-weight:600; }
+
+  .mk-toolbar{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    padding:8px 12px;
+    background:var(--mk-panel-bg);
+    border-bottom:1px solid var(--mk-border);
+  }
+  .mk-btn{
+    font-family:inherit;
+    font-size:11px;
+    font-weight:500;
+    padding:5px 10px;
+    border-radius:4px;
+    border:1px solid var(--mk-border);
+    background:var(--mk-btn-bg);
+    color:var(--mk-ink);
+  }
+  .mk-btn.primary{
+    background:var(--mk-accent);
+    border-color:var(--mk-accent);
+    color:var(--mk-on-accent);
+    font-weight:600;
+  }
+
+  .mk-tabs{
+    display:flex; gap:4px;
+    padding:0 12px;
+    background:var(--mk-app-bg);
+    border-bottom:1px solid var(--mk-border);
+  }
+  .mk-tab{
+    font-size:12px;
+    padding:9px 14px;
+    color:var(--mk-muted);
+    border-bottom:2px solid transparent;
+  }
+  .mk-tab.active{
+    color:var(--mk-ink);
+    border-bottom-color:var(--mk-accent);
+    font-weight:600;
+  }
+
+  .mk-body{ display:flex; min-height:330px; }
+
+  .mk-layers{
+    width:148px; flex:none;
+    background:var(--mk-panel-bg);
+    border-right:1px solid var(--mk-border);
+    padding:13px 11px;
+    font-size:11.5px;
+  }
+  .mk-layers h4{
+    margin:0 0 9px;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.07em;
+    color:var(--mk-muted);
+    font-weight:600;
+  }
+  .mk-layer-row{ display:flex; align-items:center; gap:7px; padding:4.5px 0; color:var(--mk-ink); }
+  .mk-layer-row.off{ color:var(--mk-muted); }
+  .mk-swatch{ width:9px;height:9px;border-radius:2px; flex:none; }
+
+  .mk-canvas{
+    flex:1; position:relative;
+    background:var(--mk-canvas-bg);
+    background-image:
+      linear-gradient(var(--mk-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--mk-grid) 1px, transparent 1px);
+    background-size: 22px 22px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .mk-canvas svg{ width:88%; height:88%; }
+
+  .mk-bom{ width:236px; flex:none; background:var(--mk-panel-bg); border-left:1px solid var(--mk-border); font-size:11px; }
+  .mk-bom-head, .mk-bom-row{
+    display:grid; grid-template-columns: 28px 1fr 1fr 44px; gap:6px; align-items:center;
+    padding:6.5px 10px;
+  }
+  .mk-bom-head{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--mk-muted);
+    border-bottom:1px solid var(--mk-border); font-weight:600;
+  }
+  .mk-bom-row{ border-bottom:1px solid var(--mk-border-soft); font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:10px; }
+  .mk-bom-row.alt{ background:var(--mk-row-alt); }
+  .mk-bom-row .pkg{ width:15px;height:15px;border-radius:3px; background:var(--mk-accent); opacity:.85; }
+  .mk-bom-row .val{ color:var(--mk-ink); }
+  .mk-bom-row .fp{ color:var(--mk-muted); }
+  .mk-bom-row .side{ color:var(--mk-accent); font-weight:600; }
+
+  .mk-status{
+    display:flex; justify-content:space-between; gap:12px;
+    padding:5px 12px;
+    background:var(--mk-titlebar-bg);
+    border-top:1px solid var(--mk-border);
+    font-family:'IBM Plex Mono',ui-monospace,monospace;
+    font-size:10px;
+    color:var(--mk-muted);
+  }
+
+  /* ---------- Concept A: Fab Floor ---------- */
+  .concept-a{
+    --mk-app-bg:#16181A; --mk-panel-bg:#1D2023; --mk-titlebar-bg:#101214;
+    --mk-btn-bg:#23272B; --mk-border:#2B2F33; --mk-border-soft:#24282C;
+    --mk-ink:#E9EBEA; --mk-muted:#8B949B;
+    --mk-accent:#3FAE7C; --mk-on-accent:#0B140F; --mk-icon:#3FAE7C;
+    --mk-canvas-bg:#131516; --mk-grid:#1D2022; --mk-row-alt:#202327;
+  }
+
+  /* ---------- Concept B: Bench Light ---------- */
+  .concept-b{
+    --mk-app-bg:#F7F9FA; --mk-panel-bg:#FFFFFF; --mk-titlebar-bg:#EDF1F4;
+    --mk-btn-bg:#FFFFFF; --mk-border:#D7DEE4; --mk-border-soft:#E7ECEF;
+    --mk-ink:#1C2630; --mk-muted:#66737F;
+    --mk-accent:#1D5FA8; --mk-on-accent:#FFFFFF; --mk-icon:#1D5FA8;
+    --mk-canvas-bg:#14171A; --mk-grid:#1E2226; --mk-row-alt:#F2F5F7;
+  }
+
+  /* ---------- Concept C: Copper & Flux ---------- */
+  .concept-c{
+    --mk-app-bg:#E7DFC8; --mk-panel-bg:#F1EBDA; --mk-titlebar-bg:#DCD1B3;
+    --mk-btn-bg:#F1EBDA; --mk-border:#C4B78D; --mk-border-soft:#D8CBA5;
+    --mk-ink:#2B2116; --mk-muted:#786A4E;
+    --mk-accent:#B5651D; --mk-on-accent:#FBF3E1; --mk-icon:#B5651D;
+    --mk-canvas-bg:#141210; --mk-grid:#1E1B17; --mk-row-alt:#EAE1C8;
+  }
+  .concept-c .mk-titlebar, .concept-c .mk-tab.active{ font-family:'IBM Plex Serif',serif; letter-spacing:.01em; }
+
+  footer.page-foot{
+    margin-top:52px; padding-top:22px;
+    border-top:1px solid var(--page-border);
+    color:var(--page-muted); font-size:13px; line-height:1.6;
+    max-width:70ch;
+  }
+
+  @media (max-width:680px){
+    .mk-body{ flex-direction:column; }
+    .mk-layers{ width:100%; border-right:none; border-bottom:1px solid var(--mk-border); }
+    .mk-bom{ width:100%; border-left:none; border-top:1px solid var(--mk-border); }
+    .mk-canvas{ height:200px; }
+    .mk-menubar{ display:none; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="page-head">
+    <p class="eyebrow">NeoDen Gerber Viewer — UI direction</p>
+    <h1>Three palette concepts, on the real layout</h1>
+    <p>Each mock reuses the app's actual chrome — menu, toolbar, Board View tabs, Layers panel, PCB canvas, and BOM grid — so you're judging the colors on your own screens, not an abstract palette strip. All three share one type family (IBM Plex) in different cuts, so the family resemblance is intentional; only color and a little weight change between them.</p>
+  </header>
+
+  <!-- ============ CONCEPT A ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div class="tag">CONCEPT A</div>
+      <h2>Fab Floor</h2>
+      <p class="rationale">Dark chrome that matches the canvas you already have, instead of a light frame around a dark rectangle. Soldermask green carries every accent; copper amber is reserved for the one row that needs it. Best for long sessions at the bench.</p>
+    </div>
+    <div class="app-mock concept-a">
+      <div class="mk-titlebar">
+        <span class="dot"></span> NeoDen Gerber Viewer
+        <span class="win-dots"><i></i><i></i><i></i></span>
+      </div>
+      <div class="mk-menubar"><span class="active">File</span><span>Settings</span></div>
+      <div class="mk-toolbar">
+        <button class="mk-btn primary">Import Zip…</button>
+        <button class="mk-btn">Import BOM / PnP…</button>
+        <button class="mk-btn">Auto-Assign Feeders</button>
+      </div>
+      <div class="mk-tabs">
+        <div class="mk-tab active">Board View</div>
+        <div class="mk-tab">NeoDen4 Feeder Setup</div>
+        <div class="mk-tab">Settings</div>
+      </div>
+      <div class="mk-body">
+        <div class="mk-layers">
+          <h4>Layers</h4>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#3FAE7C"></span>Outline</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#D9A441"></span>Top Paste</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#7A6A3A"></span>Bottom Paste</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#E7EAE9"></span>Top Silkscreen</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#5B6A63"></span>Fiducials</div>
+        </div>
+        <div class="mk-canvas">
+          <svg viewBox="0 0 380 240">
+            <rect x="60" y="30" width="220" height="150" rx="6" fill="#215E43" stroke="#3FAE7C" stroke-width="1.5"/>
+            <g fill="#D9A441"><rect x="80" y="48" width="34" height="20" rx="2"/><circle cx="86" cy="54" r="2" fill="#16181A"/></g>
+            <g fill="#3FAE7C" opacity=".9"><rect x="140" y="90" width="46" height="46" rx="3"/></g>
+            <g fill="#D9A441"><rect x="220" y="120" width="34" height="20" rx="2"/><circle cx="226" cy="126" r="2" fill="#16181A"/></g>
+            <rect x="300" y="60" width="16" height="90" rx="2" fill="#33383D" stroke="#4A5057"/>
+            <rect x="322" y="60" width="16" height="90" rx="2" fill="#33383D" stroke="#4A5057"/>
+            <g stroke="#8B949B" stroke-width="1">
+              <line x1="30" y1="210" x2="360" y2="210"/><line x1="30" y1="190" x2="30" y2="210"/>
+              <line x1="90" y1="200" x2="90" y2="210"/><line x1="150" y1="200" x2="150" y2="210"/>
+            </g>
+          </svg>
+        </div>
+        <div class="mk-bom">
+          <div class="mk-bom-head"><span></span><span>Ref</span><span>Value</span><span>Side</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C1, C18, C2</span><span class="fp">0.1µF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">U1, U2</span><span class="fp">QFN28</span><span class="side">Bot</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C42</span><span class="fp">4.7nF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">M1</span><span class="fp">ESP32</span><span class="side">Top</span></div>
+        </div>
+      </div>
+      <div class="mk-status"><span>X 148.32  Y 62.10 mm</span><span>Zoom 220%</span></div>
+    </div>
+  </section>
+
+  <!-- ============ CONCEPT B ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div class="tag">CONCEPT B</div>
+      <h2>Bench Light</h2>
+      <p class="rationale">A clean daylight chrome closer to Altium/KiCad's light modes — cool near-white panels, a precise circuit-trace blue for actions and the active tab. The canvas stays dark on purpose: that's the one part of a PCB tool every engineer expects to see rendered on black, regardless of app theme.</p>
+    </div>
+    <div class="app-mock concept-b">
+      <div class="mk-titlebar">
+        <span class="dot"></span> NeoDen Gerber Viewer
+        <span class="win-dots"><i></i><i></i><i></i></span>
+      </div>
+      <div class="mk-menubar"><span class="active">File</span><span>Settings</span></div>
+      <div class="mk-toolbar">
+        <button class="mk-btn primary">Import Zip…</button>
+        <button class="mk-btn">Import BOM / PnP…</button>
+        <button class="mk-btn">Auto-Assign Feeders</button>
+      </div>
+      <div class="mk-tabs">
+        <div class="mk-tab active">Board View</div>
+        <div class="mk-tab">NeoDen4 Feeder Setup</div>
+        <div class="mk-tab">Settings</div>
+      </div>
+      <div class="mk-body">
+        <div class="mk-layers">
+          <h4>Layers</h4>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#1E6B3C"></span>Outline</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#C08A2A"></span>Top Paste</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#B9C2CA"></span>Bottom Paste</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#1D5FA8"></span>Top Silkscreen</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#B9C2CA"></span>Fiducials</div>
+        </div>
+        <div class="mk-canvas">
+          <svg viewBox="0 0 380 240">
+            <rect x="60" y="30" width="220" height="150" rx="6" fill="#1E6B3C" stroke="#2E8B57" stroke-width="1.5"/>
+            <g fill="#C08A2A"><rect x="80" y="48" width="34" height="20" rx="2"/><circle cx="86" cy="54" r="2" fill="#14171A"/></g>
+            <g fill="#4C9EEB" opacity=".9"><rect x="140" y="90" width="46" height="46" rx="3"/></g>
+            <g fill="#C08A2A"><rect x="220" y="120" width="34" height="20" rx="2"/><circle cx="226" cy="126" r="2" fill="#14171A"/></g>
+            <rect x="300" y="60" width="16" height="90" rx="2" fill="#2A2E33" stroke="#454B52"/>
+            <rect x="322" y="60" width="16" height="90" rx="2" fill="#2A2E33" stroke="#454B52"/>
+            <g stroke="#6B7580" stroke-width="1">
+              <line x1="30" y1="210" x2="360" y2="210"/><line x1="30" y1="190" x2="30" y2="210"/>
+              <line x1="90" y1="200" x2="90" y2="210"/><line x1="150" y1="200" x2="150" y2="210"/>
+            </g>
+          </svg>
+        </div>
+        <div class="mk-bom">
+          <div class="mk-bom-head"><span></span><span>Ref</span><span>Value</span><span>Side</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C1, C18, C2</span><span class="fp">0.1µF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">U1, U2</span><span class="fp">QFN28</span><span class="side">Bot</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C42</span><span class="fp">4.7nF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">M1</span><span class="fp">ESP32</span><span class="side">Top</span></div>
+        </div>
+      </div>
+      <div class="mk-status"><span>X 148.32  Y 62.10 mm</span><span>Zoom 220%</span></div>
+    </div>
+  </section>
+
+  <!-- ============ CONCEPT C ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div class="tag">CONCEPT C</div>
+      <h2>Copper &amp; Flux</h2>
+      <p class="rationale">Built from the board itself rather than generic UI neutrals: raw FR4 tan for the chrome, copper for every accent. The canvas even swaps the usual soldermask green for a bare-copper board — this is the only concept where the material shifts with the theme, not just the color.</p>
+    </div>
+    <div class="app-mock concept-c">
+      <div class="mk-titlebar">
+        <span class="dot"></span> NeoDen Gerber Viewer
+        <span class="win-dots"><i></i><i></i><i></i></span>
+      </div>
+      <div class="mk-menubar"><span class="active">File</span><span>Settings</span></div>
+      <div class="mk-toolbar">
+        <button class="mk-btn primary">Import Zip…</button>
+        <button class="mk-btn">Import BOM / PnP…</button>
+        <button class="mk-btn">Auto-Assign Feeders</button>
+      </div>
+      <div class="mk-tabs">
+        <div class="mk-tab active">Board View</div>
+        <div class="mk-tab">NeoDen4 Feeder Setup</div>
+        <div class="mk-tab">Settings</div>
+      </div>
+      <div class="mk-body">
+        <div class="mk-layers">
+          <h4>Layers</h4>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#B5651D"></span>Outline</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#8A4A14"></span>Top Paste</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#B7A879"></span>Bottom Paste</div>
+          <div class="mk-layer-row"><span class="mk-swatch" style="background:#2B2116"></span>Top Silkscreen</div>
+          <div class="mk-layer-row off"><span class="mk-swatch" style="background:#B7A879"></span>Fiducials</div>
+        </div>
+        <div class="mk-canvas">
+          <svg viewBox="0 0 380 240">
+            <rect x="60" y="30" width="220" height="150" rx="6" fill="#C88A3F" stroke="#E0A559" stroke-width="1.5"/>
+            <g stroke="#8A4A14" stroke-width="1.2" opacity=".7">
+              <line x1="70" y1="70" x2="270" y2="70"/><line x1="70" y1="100" x2="180" y2="100"/>
+              <line x1="70" y1="150" x2="230" y2="150"/>
+            </g>
+            <g fill="#3A2A14"><rect x="80" y="48" width="34" height="20" rx="2"/><circle cx="86" cy="54" r="2" fill="#E0A559"/></g>
+            <g fill="#8A4A14" opacity=".95"><rect x="140" y="90" width="46" height="46" rx="3"/></g>
+            <g fill="#3A2A14"><rect x="220" y="120" width="34" height="20" rx="2"/><circle cx="226" cy="126" r="2" fill="#E0A559"/></g>
+            <rect x="300" y="60" width="16" height="90" rx="2" fill="#332B1E" stroke="#4E4530"/>
+            <rect x="322" y="60" width="16" height="90" rx="2" fill="#332B1E" stroke="#4E4530"/>
+            <g stroke="#8A7B5A" stroke-width="1">
+              <line x1="30" y1="210" x2="360" y2="210"/><line x1="30" y1="190" x2="30" y2="210"/>
+              <line x1="90" y1="200" x2="90" y2="210"/><line x1="150" y1="200" x2="150" y2="210"/>
+            </g>
+          </svg>
+        </div>
+        <div class="mk-bom">
+          <div class="mk-bom-head"><span></span><span>Ref</span><span>Value</span><span>Side</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C1, C18, C2</span><span class="fp">0.1µF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">U1, U2</span><span class="fp">QFN28</span><span class="side">Bot</span></div>
+          <div class="mk-bom-row"><span class="pkg"></span><span class="val">C42</span><span class="fp">4.7nF · 0603</span><span class="side">Top</span></div>
+          <div class="mk-bom-row alt"><span class="pkg"></span><span class="val">M1</span><span class="fp">ESP32</span><span class="side">Top</span></div>
+        </div>
+      </div>
+      <div class="mk-status"><span>X 148.32  Y 62.10 mm</span><span>Zoom 220%</span></div>
+    </div>
+  </section>
+
+  <footer class="page-foot">
+    All three keep the PCB canvas dark and the grid/status bar in IBM Plex Mono — only the app chrome (menu, toolbar, tabs, panels) changes. Tell me which one, or mix-and-match (e.g. Concept A's dark chrome with Concept C's copper canvas), and I'll wire the actual WPF styles.
+  </footer>
+</div>

@@ -67,7 +67,11 @@ public static class GerberRenderer
     // remaining endpoint at each step (not just the first one within a small tolerance) is far
     // more robust to that kind of drift while a generous max-gap still keeps genuinely separate
     // loops (e.g. a real cutout) from being bridged together.
-    private static List<List<PointMm>> BuildClosedLoops(IReadOnlyList<GerberPrimitive> primitives, double maxGapMm = 1.0)
+    /// <summary>Internal (not private) so <see cref="Dxf.DxfWriter"/> can chain the same
+    /// outline-file line/arc primitives into closed loops for DXF export that this class already
+    /// uses to fill the board shape on screen - guarantees the exported DXF outline is exactly the
+    /// same shape the user sees rendered, not a second, potentially-diverging implementation.</summary>
+    internal static List<List<PointMm>> BuildClosedLoops(IReadOnlyList<GerberPrimitive> primitives, double maxGapMm = 1.0)
     {
         var segments = new List<(PointMm Start, PointMm End)>();
         foreach (var primitive in primitives)

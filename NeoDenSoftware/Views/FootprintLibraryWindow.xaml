@@ -1,6 +1,7 @@
 <Window x:Class="NeoDenSoftware.Views.FootprintLibraryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:NeoDenSoftware.ViewModels"
         Title="Footprint Library" Height="560" Width="680"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip">
     <DockPanel Margin="12">
@@ -27,16 +28,32 @@
                              ToolTip="One or more names, comma-separated (e.g. 0805, 805) - any of them will match this footprint."
                              Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="L (mm):" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <TextBox Grid.Column="3" Text="{Binding NewLengthMm, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <!-- No UpdateSourceTrigger=PropertyChanged here on purpose: with a double-typed
+                         property, pushing on every keystroke makes WPF reformat the TextBox's Text
+                         from the (unchanged) source value the instant a partial string like "3."
+                         parses to the same double as "3" - silently eating the decimal point before
+                         the next digit lands. Plain LostFocus (the TextBox.Text default) commits the
+                         whole typed string in one shot instead. -->
+                    <TextBox Grid.Column="3" Text="{Binding NewLengthMm}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="4" Text="W (mm):" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <TextBox Grid.Column="5" Text="{Binding NewWidthMm, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="5" Text="{Binding NewWidthMm}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="6" Text="H (mm):" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <TextBox Grid.Column="7" Text="{Binding NewHeightMm, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="7" Text="{Binding NewHeightMm}" VerticalAlignment="Center"/>
                 </Grid>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                     <Button Content="Browse Image..." Padding="8,3" Click="Browse_Click"/>
                     <TextBlock Text="{Binding ImagePathDisplay}" VerticalAlignment="Center" Margin="10,0,0,0"
                                Foreground="Gray" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Content="Upload STL..." Padding="8,3" Click="UploadStl_Click"/>
+                    <TextBlock Text="{Binding StlPathDisplay}" VerticalAlignment="Center" Margin="10,0,0,0"
+                               Foreground="Gray" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBlock Text="No image/STL? Shape:" VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{x:Static vm:FootprintLibraryViewModel.ShapeKindOptions}"
+                              SelectedItem="{Binding NewShapeKind}" Width="140" Margin="6,0,0,0"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0" HorizontalAlignment="Right">
                     <TextBlock Text="{Binding StatusMessage}" Foreground="Orange" VerticalAlignment="Center"
@@ -55,6 +72,7 @@
                 <DataGridTextColumn Header="Length (mm)" Binding="{Binding LengthMm}" Width="100"/>
                 <DataGridTextColumn Header="Width (mm)" Binding="{Binding WidthMm}" Width="100"/>
                 <DataGridTextColumn Header="Height (mm)" Binding="{Binding HeightMm}" Width="100"/>
+                <DataGridTextColumn Header="Source" Binding="{Binding SourceLabel}" Width="70"/>
                 <DataGridCheckBoxColumn Header="Custom" Width="70">
                     <DataGridCheckBoxColumn.Binding>
                         <!-- DataGridCheckBoxColumn defaults to a TwoWay binding (unlike text

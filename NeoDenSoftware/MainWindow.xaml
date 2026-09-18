@@ -27,13 +27,18 @@
             <MenuItem Header="_Settings">
                 <MenuItem Header="_Tape Feeder Positions" Click="TapeFeederPositions_Click"/>
                 <MenuItem Header="_Board Origin..." Click="BoardOrigin_Click"/>
+                <MenuItem Header="_Tray STL Generator Settings..." Click="TrayStlGeneratorSettings_Click"/>
+                <MenuItem Header="_Appearance..." Click="Appearance_Click"/>
             </MenuItem>
         </Menu>
 
         <ToolBar Grid.Row="1">
             <Button Content="Import Gerber Zip..." Command="{Binding ImportCommand}" Padding="8,2"/>
             <TextBlock Text="PCB Thickness (mm):" VerticalAlignment="Center" Margin="8,0,4,0"/>
-            <TextBox Text="{Binding PcbThicknessMm, UpdateSourceTrigger=PropertyChanged}" Width="50" VerticalAlignment="Center"/>
+            <!-- No UpdateSourceTrigger=PropertyChanged - see the matching comment in
+                 FootprintLibraryWindow.xaml for why that eats decimal points on a double-typed
+                 property. LostFocus (the default) commits the full typed string in one shot. -->
+            <TextBox Text="{Binding PcbThicknessMm}" Width="50" VerticalAlignment="Center"/>
             <Separator/>
             <Button Content="Import BOM + PnP..." Command="{Binding ImportComponentsCommand}" Padding="8,2"/>
         </ToolBar>
@@ -43,8 +48,9 @@
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="220"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="420"/>
+                <ColumnDefinition Width="*" MinWidth="200"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="420" MinWidth="200"/>
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="0,0,1,0">
@@ -170,7 +176,10 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Column="2" BorderBrush="Gray" BorderThickness="1,0,0,0">
+            <GridSplitter Grid.Column="2" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                          Background="Gray" Cursor="SizeWE" ResizeBehavior="PreviousAndNext"/>
+
+            <Border Grid.Column="3" BorderBrush="Gray" BorderThickness="1,0,0,0">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="BOM" FontWeight="Bold" Margin="8"/>
                     <DataGrid ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False"
@@ -192,11 +201,21 @@
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
                             <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="55" IsReadOnly="True"/>
-                            <DataGridComboBoxColumn Header="Footprint"
-                                                     SelectedItemBinding="{Binding SelectedFootprint}"
-                                                     DisplayMemberPath="Name"
-                                                     ItemsSource="{x:Static footprints:FootprintLibrary.AllWithNoMatch}"
-                                                     Width="100"/>
+                            <DataGridTemplateColumn Header="Footprint" Width="140">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FootprintDisplayText}" VerticalAlignment="Center" Margin="4,0"
+                                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding FootprintDisplayText}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                                <DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <ComboBox SelectedItem="{Binding SelectedFootprint}"
+                                                  DisplayMemberPath="Name"
+                                                  ItemsSource="{x:Static footprints:FootprintLibrary.AllWithNoMatch}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellEditingTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="55" IsReadOnly="True"/>
                             <DataGridTextColumn Header="Status" Binding="{Binding PlacementStatus}" Width="80" IsReadOnly="True"/>
                             <DataGridTemplateColumn Header="" Width="60">
@@ -220,10 +239,34 @@
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
                     <Button Content="Auto-Assign Feeders" Command="{Binding AutoAssignFeedersCommand}" Click="CommitFeederSetupEdits_Click" Padding="8,2"/>
                     <Button Content="Create NeoDen4 File..." Command="{Binding GenerateNeoDenCsvCommand}" Click="CommitFeederSetupEdits_Click" Padding="8,2" Margin="8,0,0,0"/>
+                    <Button Content="Combine Selected" Click="CombineSelectedGroups_Click" Padding="8,2" Margin="16,0,0,0"
+                            ToolTip="Select two or more rows (Ctrl/Shift-click) and combine them into one feeder row."/>
+                    <Button Content="Undo Combine (Ctrl+Z)" Click="UndoCombine_Click" IsEnabled="{Binding CanUndoCombine}" Padding="8,2" Margin="8,0,0,0"/>
                     <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"
-                               Text="Unchecked parts: feeders 1-40.  Checked (high bank) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
+                               Text="Unchecked parts: feeders 1-40.  Checked (tray feeder) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
                 </StackPanel>
                 <DataGrid x:Name="FeederSetupDataGrid" ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                    <DataGrid.Resources>
+                        <!-- Right-clicking a row that's already part of a multi-selection would
+                             otherwise collapse the selection down to just that row (WPF's default
+                             DataGridRow behavior treats right-click like left-click for selection
+                             purposes) - handled here so "right-click -> Combine" works on however
+                             many rows were Ctrl/Shift-selected beforehand, not just one. -->
+                        <Style TargetType="DataGridRow">
+                            <EventSetter Event="PreviewMouseRightButtonDown" Handler="FeederRow_PreviewMouseRightButtonDown"/>
+                        </Style>
+                    </DataGrid.Resources>
+                    <DataGrid.ContextMenu>
+                        <!-- A ContextMenu is a separate visual root (a Popup), so it does NOT
+                             inherit DataContext from FeederSetupDataGrid the normal way - bindings
+                             here go through PlacementTarget explicitly. -->
+                        <ContextMenu>
+                            <MenuItem Header="Combine Selected Rows" Click="CombineSelectedGroups_Click"/>
+                            <MenuItem Header="Undo Combine"
+                                      Click="UndoCombine_Click"
+                                      IsEnabled="{Binding PlacementTarget.DataContext.CanUndoCombine, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Ref" Binding="{Binding DesignatorsText}" Width="160" IsReadOnly="True">
                             <DataGridTextColumn.ElementStyle>
@@ -235,9 +278,9 @@
                         </DataGridTextColumn>
                         <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="100" IsReadOnly="True"/>
                         <DataGridTextColumn Header="Footprint" Binding="{Binding FootprintText}" Width="160" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="60" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Side" Binding="{Binding SideText}" Width="60" IsReadOnly="True"/>
                         <DataGridTextColumn Header="Feeder" Binding="{Binding FeederNumber}" Width="70"/>
-                        <DataGridCheckBoxColumn Header="High Bank (54-99)" Binding="{Binding UseHighFeederBank}" Width="130"/>
+                        <DataGridCheckBoxColumn Header="Tray Feeder (54-99)" Binding="{Binding UseTrayFeeder}" Width="130"/>
                     </DataGrid.Columns>
                 </DataGrid>
             </DockPanel>
@@ -248,26 +291,55 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="3*"/>
                     <RowDefinition Height="2*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,12">
-                    <TextBlock DockPanel.Dock="Top" Text="Tape Feeder Positions" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Tape Feeder Positions" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="+ Add" Padding="8,2" Command="{Binding AddTapeFeederCommand}"/>
+                    </Grid>
                     <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
-                               Text="World-space X/Y/Angle (mm/degrees) for each tape feeder slot. Edits here move the feeder live on the Board View canvas."/>
+                               Text="World-space X/Y/Angle (mm/degrees) for each tape feeder slot. Edits here move the feeder live on the Board View canvas. Any feeder can be removed, including the default set."/>
                     <DataGrid x:Name="TapeFeederSettingsDataGrid" ItemsSource="{Binding TapeFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Feeder #" Binding="{Binding Number}" Width="80" IsReadOnly="True"/>
                             <DataGridTextColumn Header="X (mm)" Binding="{Binding X}" Width="100"/>
                             <DataGridTextColumn Header="Y (mm)" Binding="{Binding Y}" Width="100"/>
                             <DataGridTextColumn Header="Angle (deg)" Binding="{Binding Angle}" Width="100"/>
+                            <DataGridTemplateColumn Header="" Width="70">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <!-- Every tape feeder is removable, default or added - unlike
+                                             tray feeders below, whose Remove is still restricted to
+                                             added-only. Deleting a default here is remembered as a
+                                             tombstone so it doesn't come back on restart (see
+                                             MainViewModel.RemoveTapeFeeder). -->
+                                        <Button Content="Remove" Padding="4,0"
+                                                Command="{Binding DataContext.RemoveTapeFeederCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
 
                 <DockPanel Grid.Row="1">
-                    <TextBlock DockPanel.Dock="Top" Text="Tray Feeder Positions" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Tray Feeder Positions" FontWeight="Bold" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="+ Add" Padding="8,2" Command="{Binding AddTrayFeederCommand}"/>
+                    </Grid>
                     <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
-                               Text="World-space begin/end X/Y (mm) and grid size for each tray feeder slot."/>
+                               Text="World-space begin/end X/Y (mm) and grid size for each tray feeder slot. Added feeders (not part of the default set) can be removed again."/>
                     <DataGrid x:Name="TrayFeederSettingsDataGrid" ItemsSource="{Binding TrayFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Feeder ID" Binding="{Binding FeederId}" Width="80" IsReadOnly="True"/>
@@ -277,9 +349,35 @@
                             <DataGridTextColumn Header="End Y (mm)" Binding="{Binding EndY}" Width="100"/>
                             <DataGridTextColumn Header="Rows" Binding="{Binding Rows}" Width="70"/>
                             <DataGridTextColumn Header="Columns" Binding="{Binding Columns}" Width="70"/>
+                            <DataGridTemplateColumn Header="" Width="70">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="Remove" Padding="4,0"
+                                                Command="{Binding DataContext.RemoveTrayFeederCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}">
+                                            <Button.Style>
+                                                <Style TargetType="Button">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRemovable}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button Content="Tray STL Generator Settings..." Padding="8,2" Click="TrayStlGeneratorSettings_Click"/>
+                    <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"
+                               Text="Variables used to build a tray-feeder parts tray STL when 'Create NeoDen4 File...' runs."/>
+                </StackPanel>
             </Grid>
         </TabItem>
         </TabControl>

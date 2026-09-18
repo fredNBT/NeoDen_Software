@@ -53,7 +53,7 @@ namespace NeoDenSoftware.Views {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/NeoDenSoftware;V1.0.0.0;component/views/layerconfirmationdialog.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/NeoDenSoftware;component/views/layerconfirmationdialog.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\..\Views\LayerConfirmationDialog.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

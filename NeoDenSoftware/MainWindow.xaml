@@ -60,18 +60,41 @@
                     </CheckBox>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
+                            <StackPanel.Resources>
+                                <!-- Shared by the Outline/Top/Bottom ItemsControls below so each
+                                     individual layer row (with its own checkbox) looks identical
+                                     regardless of which group it's in. -->
+                                <DataTemplate x:Key="LayerRowTemplate">
+                                    <StackPanel Orientation="Horizontal" Margin="4,4">
+                                        <CheckBox IsChecked="{Binding IsVisible}" VerticalAlignment="Center"/>
+                                        <Rectangle Width="14" Height="14" Fill="{Binding Color}" Margin="6,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </StackPanel.Resources>
+
                             <TextBlock Text="Layers" FontWeight="Bold" Margin="8"/>
-                            <ItemsControl ItemsSource="{Binding Layers}" Margin="4">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Orientation="Horizontal" Margin="4,4">
-                                            <CheckBox IsChecked="{Binding IsVisible}" VerticalAlignment="Center"/>
-                                            <Rectangle Width="14" Height="14" Fill="{Binding Color}" Margin="6,0" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+
+                            <!-- Outline isn't top- or bottom-specific (the same outline applies to
+                                 both sides), so it stays on its own, outside either group. -->
+                            <ItemsControl ItemsSource="{Binding OutlineLayers}" Margin="4"
+                                          ItemTemplate="{StaticResource LayerRowTemplate}"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="4,10,4,2">
+                                <CheckBox IsChecked="{Binding AllTopVisible}" VerticalAlignment="Center"
+                                          ToolTip="Show/hide every Top layer together"/>
+                                <TextBlock Text="Top" FontWeight="SemiBold" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding TopLayers}" Margin="20,0,4,4"
+                                          ItemTemplate="{StaticResource LayerRowTemplate}"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="4,6,4,2">
+                                <CheckBox IsChecked="{Binding AllBottomVisible}" VerticalAlignment="Center"
+                                          ToolTip="Show/hide every Bottom layer together"/>
+                                <TextBlock Text="Bottom" FontWeight="SemiBold" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding BottomLayers}" Margin="20,0,4,4"
+                                          ItemTemplate="{StaticResource LayerRowTemplate}"/>
 
                             <TextBlock Text="Fiducials" FontWeight="Bold" Margin="8,16,8,4"/>
 
@@ -182,7 +205,7 @@
             <Border Grid.Column="3" BorderBrush="Gray" BorderThickness="1,0,0,0">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="BOM" FontWeight="Bold" Margin="8"/>
-                    <DataGrid ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False"
+                    <DataGrid ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                               RowHeaderWidth="0" RowHeight="44" Margin="4">
                         <DataGrid.Columns>
                             <DataGridTemplateColumn Header="Pkg" Width="46">
@@ -245,7 +268,7 @@
                     <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"
                                Text="Unchecked parts: feeders 1-40.  Checked (tray feeder) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
                 </StackPanel>
-                <DataGrid x:Name="FeederSetupDataGrid" ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                <DataGrid x:Name="FeederSetupDataGrid" ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" RowHeaderWidth="0">
                     <DataGrid.Resources>
                         <!-- Right-clicking a row that's already part of a multi-selection would
                              otherwise collapse the selection down to just that row (WPF's default
@@ -305,7 +328,7 @@
                     </Grid>
                     <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
                                Text="World-space X/Y/Angle (mm/degrees) for each tape feeder slot. Edits here move the feeder live on the Board View canvas. Any feeder can be removed, including the default set."/>
-                    <DataGrid x:Name="TapeFeederSettingsDataGrid" ItemsSource="{Binding TapeFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                    <DataGrid x:Name="TapeFeederSettingsDataGrid" ItemsSource="{Binding TapeFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" RowHeaderWidth="0">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Feeder #" Binding="{Binding Number}" Width="80" IsReadOnly="True"/>
                             <DataGridTextColumn Header="X (mm)" Binding="{Binding X}" Width="100"/>
@@ -340,7 +363,7 @@
                     </Grid>
                     <TextBlock DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,8" TextWrapping="Wrap"
                                Text="World-space begin/end X/Y (mm) and grid size for each tray feeder slot. Added feeders (not part of the default set) can be removed again."/>
-                    <DataGrid x:Name="TrayFeederSettingsDataGrid" ItemsSource="{Binding TrayFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0">
+                    <DataGrid x:Name="TrayFeederSettingsDataGrid" ItemsSource="{Binding TrayFeederSettings}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" RowHeaderWidth="0">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Feeder ID" Binding="{Binding FeederId}" Width="80" IsReadOnly="True"/>
                             <DataGridTextColumn Header="Begin X (mm)" Binding="{Binding BeginX}" Width="100"/>

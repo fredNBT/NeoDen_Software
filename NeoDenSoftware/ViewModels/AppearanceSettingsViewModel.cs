@@ -23,6 +23,7 @@ public sealed class AppearanceSettingsViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsFabFloor));
             OnPropertyChanged(nameof(IsBenchLight));
             OnPropertyChanged(nameof(IsCopperFlux));
+            OnPropertyChanged(nameof(IsVsDark));
         }
     }
 
@@ -48,6 +49,12 @@ public sealed class AppearanceSettingsViewModel : ViewModelBase
     {
         get => SelectedTheme == AppTheme.CopperFlux;
         set { if (value) Apply(AppTheme.CopperFlux); }
+    }
+
+    public bool IsVsDark
+    {
+        get => SelectedTheme == AppTheme.VsDark;
+        set { if (value) Apply(AppTheme.VsDark); }
     }
 
     public AppearanceSettingsViewModel()

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Windows.Media.Imaging;
 using NeoDenSoftware.Models;
 using NeoDenSoftware.Rendering;
@@ -29,6 +30,31 @@ public static class CustomFootprintStore
     private static readonly string ImagesFolder = Path.Combine(RootFolder, "FootprintImages");
     private static readonly string StlSourcesFolder = Path.Combine(RootFolder, "FootprintStlSources");
     private static readonly string ManifestPath = Path.Combine(RootFolder, "custom_footprints.json");
+
+    // Cross-process lock guarding every read-modify-write of the manifest below (every Add*/
+    // Update* method acquires it for its whole body). The comment above documents the historical
+    // failure this guards against: two processes touching the same manifest file at once, each
+    // reading it before the other's write landed, so the later write silently discarded whatever
+    // the first had just added - not a one-time fluke, it can recur any time two copies of this
+    // app (or a test harness pointed at the real store by mistake) run at the same time. A named
+    // Mutex serializes every call across every process on the machine, not just within one, so the
+    // second writer always sees the first writer's result before making its own change.
+    private static readonly Mutex ManifestLock = new(initiallyOwned: false, name: "NeoDenSoftware_FootprintManifestLock");
+
+    private static List<ManifestEntry> ReadManifest() =>
+        File.Exists(ManifestPath)
+            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
+            : [];
+
+    private static void WriteManifest(List<ManifestEntry> entries)
+    {
+        // A one-generation backup, refreshed on every write - if a bad write ever lands here again
+        // (whatever the cause), the previous known-good state is one file rename away from being
+        // restored by hand instead of being gone for good.
+        if (File.Exists(ManifestPath))
+            File.Copy(ManifestPath, ManifestPath + ".bak", overwrite: true);
+        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+    }
 
     private static string ResolveRootFolder()
     {
@@ -77,17 +103,23 @@ public static class CustomFootprintStore
         Directory.CreateDirectory(RootFolder);
         Directory.CreateDirectory(ImagesFolder);
 
-        var imageFileName = ResolveUniqueFileName(ImagesFolder, name, Path.GetExtension(sourceImagePath));
-        var persistedImagePath = Path.Combine(ImagesFolder, imageFileName);
-        File.Copy(sourceImagePath, persistedImagePath, overwrite: true);
+        ManifestLock.WaitOne();
+        try
+        {
+            var imageFileName = ResolveUniqueFileName(ImagesFolder, name, Path.GetExtension(sourceImagePath));
+            var persistedImagePath = Path.Combine(ImagesFolder, imageFileName);
+            File.Copy(sourceImagePath, persistedImagePath, overwrite: true);
 
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
-        entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList()));
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+            var entries = ReadManifest();
+            entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList()));
+            WriteManifest(entries);
 
-        return new FootprintDefinition(name, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0, persistedImagePath, aliases, IsCustom: true);
+            return new FootprintDefinition(name, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0, persistedImagePath, aliases, IsCustom: true);
+        }
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Adds a new user-defined footprint with NO image or STL - it renders as a
@@ -99,13 +131,19 @@ public static class CustomFootprintStore
     {
         Directory.CreateDirectory(RootFolder);
 
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
-        entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, null, aliases.ToList(), null, shapeKind));
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+        ManifestLock.WaitOne();
+        try
+        {
+            var entries = ReadManifest();
+            entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, null, aliases.ToList(), null, shapeKind));
+            WriteManifest(entries);
 
-        return new FootprintDefinition(name, lengthMm, widthMm, heightMm, shapeKind, 0, null, aliases, null, IsCustom: true);
+            return new FootprintDefinition(name, lengthMm, widthMm, heightMm, shapeKind, 0, null, aliases, null, IsCustom: true);
+        }
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Same as <see cref="AddFootprint"/>, but the "image" is rendered once from an
@@ -122,20 +160,26 @@ public static class CustomFootprintStore
         var mesh = StlParser.Parse(sourceStlPath);
         var rendered = StlRenderer.RenderTopDown(mesh);
 
-        var imageFileName = ResolveUniqueFileName(ImagesFolder, name, ".png");
-        SavePng(rendered, Path.Combine(ImagesFolder, imageFileName));
+        ManifestLock.WaitOne();
+        try
+        {
+            var imageFileName = ResolveUniqueFileName(ImagesFolder, name, ".png");
+            SavePng(rendered, Path.Combine(ImagesFolder, imageFileName));
 
-        var stlFileName = ResolveUniqueFileName(StlSourcesFolder, name, StlExtensionOf(sourceStlPath));
-        File.Copy(sourceStlPath, Path.Combine(StlSourcesFolder, stlFileName), overwrite: true);
+            var stlFileName = ResolveUniqueFileName(StlSourcesFolder, name, StlExtensionOf(sourceStlPath));
+            File.Copy(sourceStlPath, Path.Combine(StlSourcesFolder, stlFileName), overwrite: true);
 
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
-        entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName));
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+            var entries = ReadManifest();
+            entries.Add(new ManifestEntry(name, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName));
+            WriteManifest(entries);
 
-        return new FootprintDefinition(name, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
-            Path.Combine(ImagesFolder, imageFileName), aliases, Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
+            return new FootprintDefinition(name, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
+                Path.Combine(ImagesFolder, imageFileName), aliases, Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
+        }
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Updates an existing custom footprint's manifest entry in place, identified by its
@@ -147,40 +191,46 @@ public static class CustomFootprintStore
     /// orphaned files behind.</summary>
     public static FootprintDefinition UpdateFootprint(string originalName, string newName, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, string? newSourceImagePath)
     {
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
-
-        var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
-        if (index < 0)
-            throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
-
-        var imageFileName = entries[index].ImageFileName;
-        // A brand-new plain image supersedes any STL this footprint used to be rendered from -
-        // drop the manifest's reference to it (the archived .stl itself is left on disk rather
-        // than deleted, since it's still a legitimate record of what was originally uploaded).
-        // Editing name/dimensions alone (newSourceImagePath is null) leaves this untouched, same
-        // as the image file itself staying untouched below. imageFileName may already be null here
-        // (the entry being edited was procedural, with no image) - handled the same way as "no old
-        // file to clean up" rather than as an error.
-        var stlFileName = newSourceImagePath is null ? entries[index].StlFileName : null;
-        if (newSourceImagePath is not null)
+        ManifestLock.WaitOne();
+        try
         {
-            Directory.CreateDirectory(ImagesFolder);
-            var oldImagePath = imageFileName is null ? null : Path.Combine(ImagesFolder, imageFileName);
+            var entries = ReadManifest();
 
-            imageFileName = ResolveUniqueFileName(ImagesFolder, newName, Path.GetExtension(newSourceImagePath));
-            File.Copy(newSourceImagePath, Path.Combine(ImagesFolder, imageFileName), overwrite: true);
+            var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
 
-            if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
+            var imageFileName = entries[index].ImageFileName;
+            // A brand-new plain image supersedes any STL this footprint used to be rendered from -
+            // drop the manifest's reference to it (the archived .stl itself is left on disk rather
+            // than deleted, since it's still a legitimate record of what was originally uploaded).
+            // Editing name/dimensions alone (newSourceImagePath is null) leaves this untouched, same
+            // as the image file itself staying untouched below. imageFileName may already be null here
+            // (the entry being edited was procedural, with no image) - handled the same way as "no old
+            // file to clean up" rather than as an error.
+            var stlFileName = newSourceImagePath is null ? entries[index].StlFileName : null;
+            if (newSourceImagePath is not null)
+            {
+                Directory.CreateDirectory(ImagesFolder);
+                var oldImagePath = imageFileName is null ? null : Path.Combine(ImagesFolder, imageFileName);
+
+                imageFileName = ResolveUniqueFileName(ImagesFolder, newName, Path.GetExtension(newSourceImagePath));
+                File.Copy(newSourceImagePath, Path.Combine(ImagesFolder, imageFileName), overwrite: true);
+
+                if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
+            }
+
+            entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName);
+            WriteManifest(entries);
+
+            return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
+                imageFileName is null ? null : Path.Combine(ImagesFolder, imageFileName), aliases,
+                stlFileName is null ? null : Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
         }
-
-        entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName);
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
-
-        return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
-            imageFileName is null ? null : Path.Combine(ImagesFolder, imageFileName), aliases,
-            stlFileName is null ? null : Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Same as <see cref="UpdateFootprint"/>, but for a footprint that has (or will have)
@@ -189,23 +239,29 @@ public static class CustomFootprintStore
     /// have an uploaded image back to a plain shape), so edits don't leave orphaned files behind.</summary>
     public static FootprintDefinition UpdateFootprintProcedural(string originalName, string newName, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, FootprintShapeKind shapeKind)
     {
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
+        ManifestLock.WaitOne();
+        try
+        {
+            var entries = ReadManifest();
 
-        var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
-        if (index < 0)
-            throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
+            var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
 
-        var oldImagePath = entries[index].ImageFileName is { } oldImageFile ? Path.Combine(ImagesFolder, oldImageFile) : null;
-        var oldStlPath = entries[index].StlFileName is { } oldStlFile ? Path.Combine(StlSourcesFolder, oldStlFile) : null;
-        if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
-        if (oldStlPath is not null && File.Exists(oldStlPath)) File.Delete(oldStlPath);
+            var oldImagePath = entries[index].ImageFileName is { } oldImageFile ? Path.Combine(ImagesFolder, oldImageFile) : null;
+            var oldStlPath = entries[index].StlFileName is { } oldStlFile ? Path.Combine(StlSourcesFolder, oldStlFile) : null;
+            if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
+            if (oldStlPath is not null && File.Exists(oldStlPath)) File.Delete(oldStlPath);
 
-        entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, null, aliases.ToList(), null, shapeKind);
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+            entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, null, aliases.ToList(), null, shapeKind);
+            WriteManifest(entries);
 
-        return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, shapeKind, 0, null, aliases, null, IsCustom: true);
+            return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, shapeKind, 0, null, aliases, null, IsCustom: true);
+        }
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Same as <see cref="UpdateFootprint"/>, but replacing this footprint's rendered
@@ -214,36 +270,42 @@ public static class CustomFootprintStore
     /// <see cref="UpdateFootprint"/>'s own image-replacement cleanup).</summary>
     public static FootprintDefinition UpdateFootprintFromStl(string originalName, string newName, IReadOnlyList<string> aliases, double lengthMm, double widthMm, double heightMm, string newSourceStlPath)
     {
-        var entries = File.Exists(ManifestPath)
-            ? JsonSerializer.Deserialize<List<ManifestEntry>>(File.ReadAllText(ManifestPath)) ?? []
-            : new List<ManifestEntry>();
+        ManifestLock.WaitOne();
+        try
+        {
+            var entries = ReadManifest();
 
-        var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
-        if (index < 0)
-            throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
+            var index = entries.FindIndex(e => string.Equals(e.Name, originalName, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                throw new InvalidOperationException($"No custom footprint named '{originalName}' found to update.");
 
-        Directory.CreateDirectory(ImagesFolder);
-        Directory.CreateDirectory(StlSourcesFolder);
+            Directory.CreateDirectory(ImagesFolder);
+            Directory.CreateDirectory(StlSourcesFolder);
 
-        var oldImagePath = entries[index].ImageFileName is { } oldImageFile ? Path.Combine(ImagesFolder, oldImageFile) : null;
-        var oldStlPath = entries[index].StlFileName is { } oldStlFile ? Path.Combine(StlSourcesFolder, oldStlFile) : null;
+            var oldImagePath = entries[index].ImageFileName is { } oldImageFile ? Path.Combine(ImagesFolder, oldImageFile) : null;
+            var oldStlPath = entries[index].StlFileName is { } oldStlFile ? Path.Combine(StlSourcesFolder, oldStlFile) : null;
 
-        var mesh = StlParser.Parse(newSourceStlPath);
-        var rendered = StlRenderer.RenderTopDown(mesh);
+            var mesh = StlParser.Parse(newSourceStlPath);
+            var rendered = StlRenderer.RenderTopDown(mesh);
 
-        var imageFileName = ResolveUniqueFileName(ImagesFolder, newName, ".png");
-        SavePng(rendered, Path.Combine(ImagesFolder, imageFileName));
-        if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
+            var imageFileName = ResolveUniqueFileName(ImagesFolder, newName, ".png");
+            SavePng(rendered, Path.Combine(ImagesFolder, imageFileName));
+            if (oldImagePath is not null && File.Exists(oldImagePath)) File.Delete(oldImagePath);
 
-        var stlFileName = ResolveUniqueFileName(StlSourcesFolder, newName, StlExtensionOf(newSourceStlPath));
-        File.Copy(newSourceStlPath, Path.Combine(StlSourcesFolder, stlFileName), overwrite: true);
-        if (oldStlPath is not null && File.Exists(oldStlPath)) File.Delete(oldStlPath);
+            var stlFileName = ResolveUniqueFileName(StlSourcesFolder, newName, StlExtensionOf(newSourceStlPath));
+            File.Copy(newSourceStlPath, Path.Combine(StlSourcesFolder, stlFileName), overwrite: true);
+            if (oldStlPath is not null && File.Exists(oldStlPath)) File.Delete(oldStlPath);
 
-        entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName);
-        File.WriteAllText(ManifestPath, JsonSerializer.Serialize(entries));
+            entries[index] = new ManifestEntry(newName, lengthMm, widthMm, heightMm, imageFileName, aliases.ToList(), stlFileName);
+            WriteManifest(entries);
 
-        return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
-            Path.Combine(ImagesFolder, imageFileName), aliases, Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
+            return new FootprintDefinition(newName, lengthMm, widthMm, heightMm, FootprintShapeKind.Custom, 0,
+                Path.Combine(ImagesFolder, imageFileName), aliases, Path.Combine(StlSourcesFolder, stlFileName), IsCustom: true);
+        }
+        finally
+        {
+            ManifestLock.ReleaseMutex();
+        }
     }
 
     /// <summary>Turns a footprint name into a filesystem-safe filename stem, resolving a

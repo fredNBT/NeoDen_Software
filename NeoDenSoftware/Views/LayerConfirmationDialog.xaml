@@ -21,7 +21,7 @@
             <Button Content="Cancel" Width="90" Margin="0,0,8,0" Click="Cancel_Click" IsCancel="True"/>
             <Button Content="Continue" Width="90" IsDefault="True" Click="Continue_Click"/>
         </StackPanel>
-        <DataGrid ItemsSource="{Binding Files}" AutoGenerateColumns="False" CanUserAddRows="False" RowHeaderWidth="0" RowHeight="44">
+        <DataGrid ItemsSource="{Binding Files}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" RowHeaderWidth="0" RowHeight="44">
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="Preview" Width="72" IsReadOnly="True">
                     <DataGridTemplateColumn.CellTemplate>

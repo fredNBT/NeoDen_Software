@@ -30,6 +30,7 @@ public static class ThemeManager
             AppTheme.FabFloor => "FabFloor.xaml",
             AppTheme.BenchLight => "BenchLight.xaml",
             AppTheme.CopperFlux => "CopperFlux.xaml",
+            AppTheme.VsDark => "VsDark.xaml",
             _ => null,
         };
         if (fileName is null) return; // Original - no dictionary to merge

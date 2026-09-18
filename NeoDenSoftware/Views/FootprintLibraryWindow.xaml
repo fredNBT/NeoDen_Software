@@ -65,8 +65,14 @@
             </StackPanel>
         </Border>
 
+        <!-- CanUserDeleteRows explicitly off: it defaults to True on DataGrid, and with a row
+             selected (which happens automatically here just from clicking a row to edit it) an
+             accidental Delete/Backspace keypress removes that row straight out of
+             FootprintLibrary.All with no confirmation - the exact "footprints vanish when you do
+             changes" bug reported for this window. IsReadOnly alone does NOT prevent this; it only
+             blocks in-cell editing, not the row-delete keyboard gesture. -->
         <DataGrid ItemsSource="{Binding Footprints}" SelectedItem="{Binding SelectedFootprint}"
-                  AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" RowHeaderWidth="0">
+                  AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" IsReadOnly="True" RowHeaderWidth="0">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Names" Binding="{Binding DisplayNames}" Width="220"/>
                 <DataGridTextColumn Header="Length (mm)" Binding="{Binding LengthMm}" Width="100"/>

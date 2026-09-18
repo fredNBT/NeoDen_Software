@@ -35,3 +35,5 @@ C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Th
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\FabFloor.baml
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.baml
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.g.cs
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\VsDark.baml
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\NeoDenSo.44D713D8.Up2Date

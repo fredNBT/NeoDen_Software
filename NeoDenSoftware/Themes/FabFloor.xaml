@@ -14,6 +14,25 @@
     <SolidColorBrush x:Key="Theme.AccentForeground" Color="#0B140F"/>
     <SolidColorBrush x:Key="Theme.RowAlt" Color="#202327"/>
 
+    <!-- WPF's default MenuItem submenu popup (and several other built-in chrome pieces - ToolTip,
+         unstyled ComboBox popups, selection highlights) pull their colors from these SystemColors
+         keys via DynamicResource inside their default control templates, NOT from any Background/
+         Foreground property Setter above - a plain Style TargetType="MenuItem" Foreground setter
+         only colors the top-level menu bar item, never the dropdown popup it opens, which
+         otherwise stays the OS's own white/light "Menu" system color regardless of this theme.
+         Overriding these keys is what actually reaches into that popup. -->
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#1D2023"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="#E9EBEA"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1D2023"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E9EBEA"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#23262A"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#E9EBEA"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3FAE7C"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#0B140F"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuHighlightBrushKey}" Color="#3FAE7C"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#2B2F33"/>
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#E9EBEA"/>
+
     <Style TargetType="Window">
         <Setter Property="Background" Value="{StaticResource Theme.AppBackground}"/>
     </Style>
@@ -27,9 +46,79 @@
         <Setter Property="Foreground" Value="{StaticResource Theme.TextPrimary}"/>
     </Style>
 
+    <!-- WPF's built-in MenuItem submenu Popup does not actually honor the SystemColors overrides
+         above on every Windows theme engine (Aero2, the default on Win10/11, hardcodes its popup
+         Border to a fixed white rather than deriving it from SystemColors) - so a plain Style
+         Setter or a SystemColors override alone is not reliable here. A full ControlTemplate is
+         the only way to guarantee the dropdown itself picks up this theme's own colors regardless
+         of OS theme engine. One template covers all three roles this app actually uses: top-level
+         menu-bar headers (File/Settings), their flat dropdown children, and flat ContextMenu items
+         (Role trigger below only changes padding/popup placement, not colors - all always use
+         this theme's own palette, never the OS default). -->
     <Style TargetType="MenuItem">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{StaticResource Theme.TextPrimary}"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                        <Grid>
+                            <ContentPresenter x:Name="HeaderHost" ContentSource="Header" RecognizesAccessKey="True"
+                                              Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" HorizontalOffset="0" VerticalOffset="-1"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Fade"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                <Border Background="{StaticResource Theme.PanelBackground}"
+                                        BorderBrush="{StaticResource Theme.Border}" BorderThickness="1" Padding="2">
+                                    <StackPanel IsItemsHost="True"/>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Theme.Accent}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Theme.AccentForeground}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                        <Trigger Property="Role" Value="SubmenuHeader">
+                            <Setter TargetName="PART_Popup" Property="Placement" Value="Right"/>
+                        </Trigger>
+                        <Trigger Property="Role" Value="SubmenuItem">
+                            <Setter Property="Padding" Value="20,5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ContextMenu (e.g. the BOM grid's right-click menu) is a separate control from MenuItem's
+         own submenu Popup and needs its own chrome override for the same reason as above. -->
+    <Style TargetType="ContextMenu">
+        <Setter Property="Background" Value="{StaticResource Theme.PanelBackground}"/>
+        <Setter Property="Foreground" Value="{StaticResource Theme.TextPrimary}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Theme.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" Padding="2">
+                        <StackPanel IsItemsHost="True"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="Separator">
+        <Setter Property="Background" Value="{StaticResource Theme.Border}"/>
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="4,2"/>
     </Style>
 
     <Style TargetType="ToolBar">

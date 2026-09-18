@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -72,6 +74,8 @@ public sealed class MainViewModel : ViewModelBase
     private string? _statusMessage = "Import a Gerber zip to get started.";
     private double _pcbThicknessMm = 1.6;
     private bool _mirrorBottomLayers = true;
+    private bool _allTopVisible = true;
+    private bool _allBottomVisible = true;
     private double _boardCenterX;
     private bool _hasBoardOffset;
     private double _boardOffsetX;
@@ -116,6 +120,17 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Stack<Dictionary<string, int?>> _combineUndoStack = new();
 
     public ObservableCollection<LayerViewModel> Layers { get; } = [];
+
+    /// <summary>Three live filtered views over <see cref="Layers"/> for the sidebar's grouped
+    /// display (Outline on its own, then Top/Bottom each under their own "select all" checkbox -
+    /// see <see cref="AllTopVisible"/>/<see cref="AllBottomVisible"/>) - a <see cref="ListCollectionView"/>
+    /// wrapping the same source collection stays live as layers are added/removed on import,
+    /// without needing three separate ObservableCollections kept manually in sync with
+    /// <see cref="Layers"/> (which is mutated directly in several places - see ImportAsync).</summary>
+    public ICollectionView OutlineLayers { get; }
+    public ICollectionView TopLayers { get; }
+    public ICollectionView BottomLayers { get; }
+
     public ObservableCollection<ComponentViewModel> Components { get; } = [];
 
     /// <summary>BOM panel rows: one per (Value, FootprintText, Side) group across <see cref="Components"/>,
@@ -245,8 +260,61 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Master "select all" checkbox for the Top layer group in the sidebar - setting it
+    /// applies that value to every Top layer's own <see cref="LayerViewModel.IsVisible"/>, leaving
+    /// their individual checkboxes in place for granular control. Reflects the group's actual
+    /// state (checked only when every Top layer is currently visible) via <see cref="RecomputeAllTopVisible"/>,
+    /// kept in sync whenever any Top layer's own checkbox changes - see the constructor's
+    /// Layers.CollectionChanged wiring.</summary>
+    public bool AllTopVisible
+    {
+        get => _allTopVisible;
+        set
+        {
+            if (_allTopVisible == value) return;
+            _allTopVisible = value;
+            OnPropertyChanged();
+            foreach (var layer in Layers.Where(l => IsTopRole(l.Role)))
+                layer.IsVisible = value;
+        }
+    }
+
+    /// <summary>Same as <see cref="AllTopVisible"/>, for the Bottom layer group.</summary>
+    public bool AllBottomVisible
+    {
+        get => _allBottomVisible;
+        set
+        {
+            if (_allBottomVisible == value) return;
+            _allBottomVisible = value;
+            OnPropertyChanged();
+            foreach (var layer in Layers.Where(l => IsBottomRole(l.Role)))
+                layer.IsVisible = value;
+        }
+    }
+
     public MainViewModel()
     {
+        OutlineLayers = new ListCollectionView(Layers) { Filter = o => ((LayerViewModel)o).Role == GerberLayerRole.Outline };
+        TopLayers = new ListCollectionView(Layers) { Filter = o => IsTopRole(((LayerViewModel)o).Role) };
+        BottomLayers = new ListCollectionView(Layers) { Filter = o => IsBottomRole(((LayerViewModel)o).Role) };
+
+        // Keeps AllTopVisible/AllBottomVisible's own checked state honest as individual layer
+        // checkboxes change (including layers added/removed by a fresh import) - tracked here
+        // rather than in each LayerViewModel itself, since only this ViewModel knows which layers
+        // belong to which group.
+        Layers.CollectionChanged += (_, e) =>
+        {
+            if (e.OldItems is not null)
+                foreach (LayerViewModel layer in e.OldItems)
+                    layer.PropertyChanged -= OnLayerPropertyChanged;
+            if (e.NewItems is not null)
+                foreach (LayerViewModel layer in e.NewItems)
+                    layer.PropertyChanged += OnLayerPropertyChanged;
+            RecomputeAllTopVisible();
+            RecomputeAllBottomVisible();
+        };
+
         ImportCommand = new AsyncRelayCommand(async _ => await ImportAsync());
         ImportComponentsCommand = new AsyncRelayCommand(async _ => await ImportComponentsAsync());
         RemoveComponentCommand = new RelayCommand(param =>
@@ -1030,6 +1098,14 @@ public sealed class MainViewModel : ViewModelBase
             await ImportComponentsAsync(data.BomPath, data.BomMapping, data.PnpPath, data.PnpMapping);
         }
 
+        // Names the saved project references that no longer exist in the current library (e.g. a
+        // custom footprint that was since deleted, renamed, or lost) - collected so the user is
+        // TOLD about it below instead of the affected components just silently reverting to
+        // "(No Match)" with nothing to explain why. Re-adding a footprint under its original name
+        // (Footprint Library window) is enough to reconnect it on the next project load, since the
+        // lookup below matches purely by name.
+        var missingFootprintNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var savedByDesignator = data.Components.ToDictionary(c => c.Designator, StringComparer.OrdinalIgnoreCase);
         foreach (var component in Components.ToList())
         {
@@ -1041,7 +1117,10 @@ public sealed class MainViewModel : ViewModelBase
             }
 
             var footprint = FootprintLibrary.AllWithNoMatch.FirstOrDefault(f => f.Name == saved.FootprintName);
-            if (footprint is not null) component.SelectedFootprint = footprint;
+            if (footprint is not null)
+                component.SelectedFootprint = footprint;
+            else if (!string.IsNullOrEmpty(saved.FootprintName) && saved.FootprintName != FootprintLibrary.NoMatch.Name)
+                missingFootprintNames.Add(saved.FootprintName);
             component.RotationDegrees = saved.RotationDegrees;
             component.FeederNumber = saved.FeederNumber;
             component.UseTrayFeeder = saved.UseTrayFeeder;
@@ -1059,7 +1138,10 @@ public sealed class MainViewModel : ViewModelBase
         RefreshFeederVisuals();
         RebuildBomGroups();
 
-        StatusMessage = $"Loaded project from {System.IO.Path.GetFileName(path)}.";
+        StatusMessage = missingFootprintNames.Count == 0
+            ? $"Loaded project from {System.IO.Path.GetFileName(path)}."
+            : $"Loaded project from {System.IO.Path.GetFileName(path)}. " +
+              $"{missingFootprintNames.Count} footprint(s) no longer in the library, reset to (No Match): {string.Join(", ", missingFootprintNames)}.";
     }
 
     /// <summary>Redraws each tape/tray feeder's assigned-component image/label from whatever
@@ -1701,4 +1783,36 @@ public sealed class MainViewModel : ViewModelBase
 
     private static bool IsBottomRole(GerberLayerRole role) =>
         role is GerberLayerRole.BottomPaste or GerberLayerRole.BottomSoldermask or GerberLayerRole.BottomComponents;
+
+    private static bool IsTopRole(GerberLayerRole role) =>
+        role is GerberLayerRole.TopPaste or GerberLayerRole.TopSoldermask or GerberLayerRole.TopComponents;
+
+    private void OnLayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(LayerViewModel.IsVisible)) return;
+        RecomputeAllTopVisible();
+        RecomputeAllBottomVisible();
+    }
+
+    // Written straight to the backing field (not through the AllTopVisible/AllBottomVisible
+    // setters) so reflecting the group's current state never re-triggers the "apply to every
+    // layer in the group" cascade those setters do - that cascade is only for when the user
+    // actually clicks the master checkbox themselves.
+    private void RecomputeAllTopVisible()
+    {
+        var topLayers = Layers.Where(l => IsTopRole(l.Role)).ToList();
+        var allOn = topLayers.Count > 0 && topLayers.All(l => l.IsVisible);
+        if (_allTopVisible == allOn) return;
+        _allTopVisible = allOn;
+        OnPropertyChanged(nameof(AllTopVisible));
+    }
+
+    private void RecomputeAllBottomVisible()
+    {
+        var bottomLayers = Layers.Where(l => IsBottomRole(l.Role)).ToList();
+        var allOn = bottomLayers.Count > 0 && bottomLayers.All(l => l.IsVisible);
+        if (_allBottomVisible == allOn) return;
+        _allBottomVisible = allOn;
+        OnPropertyChanged(nameof(AllBottomVisible));
+    }
 }

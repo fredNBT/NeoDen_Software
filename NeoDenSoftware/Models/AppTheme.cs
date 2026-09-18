@@ -12,4 +12,5 @@ public enum AppTheme
     FabFloor,
     BenchLight,
     CopperFlux,
+    VsDark,
 }

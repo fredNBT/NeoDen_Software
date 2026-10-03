@@ -53,6 +53,40 @@ public static class TapeFeederRenderer
         public required UIElement Root { get; init; }
         public required TextBlock ComponentLabel { get; init; }
         public required Canvas ComponentImageSlot { get; init; }
+        public required TextBlock NumberLabel { get; init; }
+
+        private double _textCounterRotation;
+
+        /// <summary>The whole visual is rotated by (feeder angle - 90), which turns the number and
+        /// component text upside down for a -90 feeder. Rotating each text block back by the
+        /// opposite angle about its own centre keeps it exactly where it is but reads upright.
+        /// Re-applied whenever a text block changes size (its centre moves with its text).</summary>
+        public void SetTextCounterRotation(double degrees)
+        {
+            _textCounterRotation = degrees;
+            Apply(NumberLabel);
+            Apply(ComponentLabel);
+        }
+
+        internal void HookTextSizeChanges()
+        {
+            NumberLabel.SizeChanged += (_, _) => Apply(NumberLabel);
+            ComponentLabel.SizeChanged += (_, _) => Apply(ComponentLabel);
+        }
+
+        private void Apply(TextBlock text)
+        {
+            // Same Y-flip as before (so the text is upright under the world Y-flip), then the
+            // counter-rotation about the centre of the flipped text box (local y runs 0 to -height).
+            text.RenderTransform = new TransformGroup
+            {
+                Children =
+                {
+                    new ScaleTransform(1, -1),
+                    new RotateTransform(_textCounterRotation, text.ActualWidth / 2, -text.ActualHeight / 2),
+                },
+            };
+        }
     }
 
     /// <summary>Builds the feeder image + number label, centered (in the X-mark sense described
@@ -107,6 +141,8 @@ public static class TapeFeederRenderer
         host.Children.Add(label);
         host.Children.Add(componentLabel);
         host.Children.Add(componentImageSlot);
-        return new FeederVisual { Root = host, ComponentLabel = componentLabel, ComponentImageSlot = componentImageSlot };
+        var visual = new FeederVisual { Root = host, ComponentLabel = componentLabel, ComponentImageSlot = componentImageSlot, NumberLabel = label };
+        visual.HookTextSizeChanges();
+        return visual;
     }
 }

@@ -84,6 +84,7 @@ public sealed class TapeFeederSettingViewModel : ViewModelBase
         _angle = initial.Angle;
 
         var feederVisual = TapeFeederRenderer.BuildFeederVisual(number);
+        _feederVisual = feederVisual;
         _componentLabelBlock = feederVisual.ComponentLabel;
         _componentImageSlot = feederVisual.ComponentImageSlot;
 
@@ -114,8 +115,11 @@ public sealed class TapeFeederSettingViewModel : ViewModelBase
         _componentImageSlot.Children.Clear();
     }
 
+    private readonly TapeFeederRenderer.FeederVisual _feederVisual;
+
     private void UpdateTransform()
     {
+        _feederVisual.SetTextCounterRotation(-(Angle - 90));
         Visual.RenderTransform = new TransformGroup
         {
             Children =

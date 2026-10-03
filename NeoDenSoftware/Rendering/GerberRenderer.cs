@@ -15,16 +15,12 @@ public static class GerberRenderer
 {
     public static readonly Brush CanvasBackground = Freeze(new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E)));
 
-    /// <summary>The classic FR4-soldermask "PCB green" - used to fill the board outline and,
-    /// for a consistent look, as that layer's stroke/legend color too.</summary>
-    public static readonly Brush PcbGreen = Freeze(new SolidColorBrush(Color.FromRgb(0x1E, 0x6B, 0x3C)));
-
     public static UIElement BuildLayerElement(ParsedLayer layer, Brush brush)
     {
         var host = new Canvas { IsHitTestVisible = false };
 
         if (layer.Role == GerberLayerRole.Outline)
-            AddOutlineFill(host, layer);
+            AddOutlineFill(host, layer, brush);
 
         AddFilledGeometry(host, layer, brush);
         AddStrokedGeometry(host, layer, brush);
@@ -36,7 +32,7 @@ public static class GerberRenderer
     // perimeter (drawn with G01/G02/G03, not a G36/G37 filled region), so there's normally no
     // RegionPrimitive to fill directly. Chain the segments/arcs end-to-end into closed loops
     // and fill those instead, so the board reads as a solid shape rather than a bare outline.
-    private static void AddOutlineFill(Canvas host, ParsedLayer layer)
+    private static void AddOutlineFill(Canvas host, ParsedLayer layer, Brush brush)
     {
         var loops = BuildClosedLoops(layer.Primitives);
         if (loops.Count == 0) return;
@@ -56,7 +52,7 @@ public static class GerberRenderer
         }
 
         geometryGroup.Freeze();
-        host.Children.Add(new Path { Data = geometryGroup, Fill = PcbGreen });
+        host.Children.Add(new Path { Data = geometryGroup, Fill = brush });
     }
 
     // Real-world outlines rarely have exactly-matching floating-point endpoints (rounding from

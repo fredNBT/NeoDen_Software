@@ -52,8 +52,13 @@ public sealed class BomImportService
             var fields = CsvParser.ParseLine(line);
             if (designatorCol >= fields.Length) continue;
 
-            var value = valueCol >= 0 && valueCol < fields.Length ? fields[valueCol] : null;
-            var footprint = footprintCol >= 0 && footprintCol < fields.Length ? fields[footprintCol] : null;
+            // A comma inside a Value/Footprint (e.g. "PCT2075TP,147") round-trips fine through
+            // this app's own quoted-CSV parsing/display, but it isn't safe to carry further -
+            // the NeoDen4 machine's own CSV import is a naive comma-split with no quote handling,
+            // so a literal comma there would silently shift every column after it. Sanitized here,
+            // once, at the BOM import boundary, rather than leaving it for the exporter to catch.
+            var value = valueCol >= 0 && valueCol < fields.Length ? SanitizeComma(fields[valueCol]) : null;
+            var footprint = footprintCol >= 0 && footprintCol < fields.Length ? SanitizeComma(fields[footprintCol]) : null;
 
             foreach (var designator in SplitDesignators(fields[designatorCol]))
                 entries.Add(new BomEntry(designator, value, footprint));
@@ -70,4 +75,6 @@ public sealed class BomImportService
 
     private static IEnumerable<string> SplitDesignators(string field) =>
         field.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string SanitizeComma(string field) => field.Replace(',', ' ');
 }

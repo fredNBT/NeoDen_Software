@@ -79,11 +79,15 @@ public static class ProjectFileService
         string? PnpColumn(string field) =>
             NullIfEmpty(rows.FirstOrDefault(r => r.Length >= 3 && r[0] == "pnpcolumn" && r[1] == field) is { } r ? r[2] : null);
 
+        // Designator/FootprintName already round-trip fine through this file's own quoted-CSV
+        // Save/Load - this isn't fixing a parsing bug, just carrying the same comma-sanitizing
+        // this app now does at BOM import forward to a project saved before that existed (or
+        // edited by hand), so a stray comma can't reach the NeoDen4 export from this path either.
         var components = rows
             .Where(r => r.Length >= 6 && r[0] == "component")
             .Select(r => new ProjectComponentRow(
-                r[1],
-                r[2],
+                SanitizeComma(r[1]),
+                SanitizeComma(r[2]),
                 ParseDouble(r[3]),
                 string.IsNullOrEmpty(r[4]) ? null : int.Parse(r[4], CultureInfo.InvariantCulture),
                 bool.TryParse(r[5], out var tray) && tray))
@@ -116,6 +120,8 @@ public static class ProjectFileService
             fiducials,
             layerRoles);
     }
+
+    private static string SanitizeComma(string field) => field.Replace(',', ' ');
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 

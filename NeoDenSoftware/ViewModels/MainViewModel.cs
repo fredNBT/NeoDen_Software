@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using NeoDenSoftware.Dxf;
+using NeoDenSoftware.Export;
 using NeoDenSoftware.Feeders;
 using NeoDenSoftware.Footprints;
 using NeoDenSoftware.Gerber;
@@ -96,6 +97,12 @@ public sealed class MainViewModel : ViewModelBase
     // whatever was last successfully imported.
     private string? _lastZipPath;
     private IReadOnlyDictionary<string, GerberLayerRole>? _lastLayerRoles;
+
+    /// <summary>The ".pnp" project file this session was loaded from, or last saved to -
+    /// null until either happens. Drives Ctrl+S's "quick save" (see
+    /// <see cref="QuickSaveProjectCommand"/>): reused directly, without prompting, so long as it's
+    /// set.</summary>
+    private string? _lastProjectPath;
     private string? _lastBomPath;
     private BomColumnMapping? _lastBomMapping;
     private string? _lastPnpPath;
@@ -121,6 +128,12 @@ public sealed class MainViewModel : ViewModelBase
 
     public ObservableCollection<LayerViewModel> Layers { get; } = [];
 
+    /// <summary>Read-only description of every value the NeoDen4 CSV export writes - shown on the
+    /// Machine Settings tab.</summary>
+    public NeoDenExportSettingsViewModel ExportSettings { get; } = new();
+
+    public IReadOnlyList<MachineSettingsSection> MachineSettings { get; } = NeoDenSettingsCatalog.Build();
+
     /// <summary>Three live filtered views over <see cref="Layers"/> for the sidebar's grouped
     /// display (Outline on its own, then Top/Bottom each under their own "select all" checkbox -
     /// see <see cref="AllTopVisible"/>/<see cref="AllBottomVisible"/>) - a <see cref="ListCollectionView"/>
@@ -138,7 +151,8 @@ public sealed class MainViewModel : ViewModelBase
     public ObservableCollection<BomGroupViewModel> BomGroups { get; } = [];
 
     /// <summary>Fiducial marks found during the last BOM/PnP import, split by side and shown in
-    /// the Layers sidebar - see <see cref="FiducialViewModel"/> for why their X/Y are untranslated.</summary>
+    /// the Layers sidebar - see <see cref="FiducialViewModel"/> for why their X/Y are the board's
+    /// translated/world coordinates (the board-offset shift included), not the raw design-file ones.</summary>
     public ObservableCollection<FiducialViewModel> TopFiducials { get; } = [];
     public ObservableCollection<FiducialViewModel> BottomFiducials { get; } = [];
 
@@ -167,6 +181,11 @@ public sealed class MainViewModel : ViewModelBase
     public ICommand AddBottomFiducialCommand { get; }
     public ICommand RemoveFiducialCommand { get; }
     public ICommand SaveProjectCommand { get; }
+
+    /// <summary>Ctrl+S's "quick save" - reuses the file this project was loaded from or last
+    /// saved to, only falling back to the save dialog when there's no such file yet. See
+    /// <see cref="SaveProject"/>.</summary>
+    public ICommand QuickSaveProjectCommand { get; }
     public ICommand LoadProjectCommand { get; }
     public ICommand AddTapeFeederCommand { get; }
     public ICommand RemoveTapeFeederCommand { get; }
@@ -337,13 +356,13 @@ public sealed class MainViewModel : ViewModelBase
         // having to type coordinates by hand.
         AddTopFiducialCommand = new RelayCommand(_ =>
         {
-            var fiducial = new FiducialViewModel(string.Empty, 0, 0, BoardSide.Top);
+            var fiducial = new FiducialViewModel(string.Empty, 0, 0, BoardSide.Top, CurrentBoardOffset);
             TopFiducials.Add(fiducial);
             PendingFiducialPick = fiducial;
         });
         AddBottomFiducialCommand = new RelayCommand(_ =>
         {
-            var fiducial = new FiducialViewModel(string.Empty, 0, 0, BoardSide.Bottom);
+            var fiducial = new FiducialViewModel(string.Empty, 0, 0, BoardSide.Bottom, CurrentBoardOffset);
             BottomFiducials.Add(fiducial);
             PendingFiducialPick = fiducial;
         });
@@ -353,7 +372,8 @@ public sealed class MainViewModel : ViewModelBase
             TopFiducials.Remove(fiducial);
             BottomFiducials.Remove(fiducial);
         });
-        SaveProjectCommand = new RelayCommand(_ => SaveProject());
+        SaveProjectCommand = new RelayCommand(_ => SaveProject(forcePrompt: true));
+        QuickSaveProjectCommand = new RelayCommand(_ => SaveProject(forcePrompt: false));
         LoadProjectCommand = new AsyncRelayCommand(async _ => await LoadProjectAsync());
         AddTapeFeederCommand = new RelayCommand(_ => AddTapeFeeder());
         RemoveTapeFeederCommand = new RelayCommand(param =>
@@ -531,18 +551,6 @@ public sealed class MainViewModel : ViewModelBase
     /// fakes brushed steel. Applied per-layer (the paste layer's Path elements share one brush
     /// instance), so the highlight band falls consistently across the whole board diagonally
     /// rather than per individual pad.</summary>
-    private static Brush BuildShinyGoldBrush()
-    {
-        var gradient = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
-        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xB8, 0x86, 0x0B), 0.0));  // dark goldenrod - depth
-        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xD7, 0x00), 0.3));  // rich gold
-        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xFF, 0xF0), 0.5));  // near-white specular highlight
-        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xD7, 0x00), 0.7));  // rich gold
-        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xB8, 0x86, 0x0B), 1.0));  // dark goldenrod - depth
-        gradient.Freeze();
-        return gradient;
-    }
-
     private static UIElement BuildAxisScaleVisual()
     {
         const double axisLengthMm = 400;
@@ -812,12 +820,18 @@ public sealed class MainViewModel : ViewModelBase
         foreach (var (role, layer) in parsedLayers)
         {
             var shiftedLayer = Translate(layer, dx, dy);
-            var visual = GerberRenderer.BuildLayerElement(shiftedLayer, DefaultColorFor(role));
+            // Paste always keeps its shiny-gold gradient look, per explicit instruction - it's the
+            // one layer deliberately NOT wired into the LayerColors shared-mutable-brush system,
+            // since a gradient has no single flat color a picker could hand back.
+            var isPaste = role is GerberLayerRole.TopPaste or GerberLayerRole.BottomPaste;
+            var brush = isPaste ? BuildShinyGoldBrush() : LayerColors.For(role);
+            var visual = GerberRenderer.BuildLayerElement(shiftedLayer, brush);
             Layers.Add(new LayerViewModel
             {
                 Name = DefaultNameFor(role),
                 Role = role,
-                Color = DefaultColorFor(role),
+                Color = isPaste ? ShinyGoldSwatchColor : brush,
+                IsColorEditable = !isPaste,
                 Visual = visual,
             });
 
@@ -928,6 +942,11 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
+        // A Y-down source file (KiCad: every real Y is negative) - typed fiducial Y values are then
+        // read as positive distances and negated, so typing "47" means the file's -47. Decided from
+        // the file's own data at import, not a persisted setting, so a project reload re-derives it.
+        _typedYIsNegated = placements.Count(p => p.YMm < 0) > placements.Count(p => p.YMm > 0);
+
         var placementByDesignator = placements
             .GroupBy(p => p.Designator, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
@@ -964,19 +983,21 @@ public sealed class MainViewModel : ViewModelBase
 
             Components.Add(component);
 
-            // Fiducials get their own sidebar entry, in *untranslated* PnP coordinates (no
-            // _boardOffsetX/Y applied) - they're physical machine-alignment reference points, so
-            // the raw design-file coordinates are what will matter later, not the shifted
-            // on-screen "world" coordinates every other placed component uses. Bottom-side
-            // fiducials get their X mirrored about the board's own (untranslated) horizontal
-            // center - same "invert X on bottom" convention as everywhere else in this app
-            // (the MirrorBottomLayers checkbox), since a bottom fiducial's raw PnP X is measured
-            // from the top-view design file, not from the flipped view the machine actually sees
-            // it in. _boardCenterX is in translated/world space, so subtracting _boardOffsetX
-            // gets back to the matching untranslated center before reflecting.
+            // Fiducials get their own sidebar entry, in *translated/world* coordinates - the same
+            // board-offset shift applied to every other placed component (xMm/yMm above), so the
+            // gold on-screen mark lines up with the actual board feature (FiducialsHost is a
+            // sibling of LayerHost in the same coordinate space) and the exported "mark" row
+            // (BuildMarkLine) sits in the same coordinate space as every placement row around it.
+            // Matches the convention TypedX/TypedY already document: a fiducial's stored X/Y is
+            // always a real on-board (offset-applied) position, never a raw design-file one.
+            // Bottom-side fiducials also get their X mirrored about the board's own (untranslated)
+            // horizontal center - same "invert X on bottom" convention as everywhere else in this
+            // app (the MirrorBottomLayers checkbox), since a bottom fiducial's raw PnP X is
+            // measured from the top-view design file, not from the flipped view the machine
+            // actually sees it in - done first, on the untranslated X, then the offset is added.
             if (hasPlacement && IsFiducial(bomEntry.Designator, bomEntry.Value))
             {
-                var fiducial = new FiducialViewModel(bomEntry.Designator, MirrorXIfBottom(placement!.XMm, side), placement.YMm, side);
+                var fiducial = new FiducialViewModel(bomEntry.Designator, MirrorXIfBottom(placement!.XMm, side) + _boardOffsetX, placement.YMm + _boardOffsetY, side, CurrentBoardOffset);
                 (side == BoardSide.Top ? TopFiducials : BottomFiducials).Add(fiducial);
             }
         }
@@ -987,7 +1008,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 Name = "Top Components",
                 Role = GerberLayerRole.TopComponents,
-                Color = Brushes.DeepSkyBlue,
+                Color = LayerColors.For(GerberLayerRole.TopComponents),
                 Visual = _topComponentsHost,
             });
         }
@@ -998,7 +1019,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 Name = "Bottom Components",
                 Role = GerberLayerRole.BottomComponents,
-                Color = Brushes.Orange,
+                Color = LayerColors.For(GerberLayerRole.BottomComponents),
                 Visual = _bottomComponentsHost,
             });
         }
@@ -1015,8 +1036,14 @@ public sealed class MainViewModel : ViewModelBase
     /// feeder assignments, removed BOM rows, fiducials) - out to a single ".pnp" project file, per
     /// explicit request. Requires a Gerber import to have happened at least once this session
     /// (<see cref="_lastZipPath"/> unset otherwise) - there'd be nothing meaningful to reload
-    /// without it.</summary>
-    private void SaveProject()
+    /// without it.
+    /// <paramref name="forcePrompt"/> is false for Ctrl+S's "quick save" (see
+    /// <see cref="QuickSaveProjectCommand"/>) - true reuses <see cref="_lastProjectPath"/> (the
+    /// file this project was loaded from, or last saved to) without prompting, falling back to the
+    /// save dialog only when there's no such file yet. The "Save Project..." menu item always
+    /// passes true, keeping its existing always-prompt behavior (its "..." implies a dialog every
+    /// time, and it's the one way to redirect a save to a different file/"Save As").</summary>
+    private void SaveProject(bool forcePrompt)
     {
         if (_lastZipPath is null)
         {
@@ -1024,7 +1051,7 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        var path = PromptForSaveProjectFile?.Invoke();
+        var path = !forcePrompt && _lastProjectPath is not null ? _lastProjectPath : PromptForSaveProjectFile?.Invoke();
         if (string.IsNullOrEmpty(path)) return;
 
         var data = new ProjectData(
@@ -1041,6 +1068,7 @@ public sealed class MainViewModel : ViewModelBase
         try
         {
             ProjectFileService.Save(path, data);
+            _lastProjectPath = path;
             StatusMessage = $"Saved project to {System.IO.Path.GetFileName(path)}.";
         }
         catch (Exception ex)
@@ -1106,16 +1134,22 @@ public sealed class MainViewModel : ViewModelBase
         // lookup below matches purely by name.
         var missingFootprintNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var savedByDesignator = data.Components.ToDictionary(c => c.Designator, StringComparer.OrdinalIgnoreCase);
+        // A source BOM/PnP can legitimately list the same designator more than once (e.g. Q8 twice,
+        // with different rotations) - so saved rows are queued per designator and handed out in
+        // order, instead of a one-row-per-designator dictionary that throws on the duplicate.
+        var savedByDesignator = data.Components
+            .GroupBy(c => c.Designator, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => new Queue<ProjectComponentRow>(g), StringComparer.OrdinalIgnoreCase);
         foreach (var component in Components.ToList())
         {
-            if (!savedByDesignator.TryGetValue(component.Designator, out var saved))
+            if (!savedByDesignator.TryGetValue(component.Designator, out var savedQueue) || savedQueue.Count == 0)
             {
                 // Not in the saved project's component list - the user had removed it before saving.
                 RemoveComponent(component);
                 continue;
             }
 
+            var saved = savedQueue.Dequeue();
             var footprint = FootprintLibrary.AllWithNoMatch.FirstOrDefault(f => f.Name == saved.FootprintName);
             if (footprint is not null)
                 component.SelectedFootprint = footprint;
@@ -1131,13 +1165,14 @@ public sealed class MainViewModel : ViewModelBase
         BottomFiducials.Clear();
         foreach (var f in data.Fiducials)
         {
-            var fiducial = new FiducialViewModel(f.Designator, f.X, f.Y, f.Side);
+            var fiducial = new FiducialViewModel(f.Designator, f.X, f.Y, f.Side, CurrentBoardOffset);
             (f.Side == BoardSide.Bottom ? BottomFiducials : TopFiducials).Add(fiducial);
         }
 
         RefreshFeederVisuals();
         RebuildBomGroups();
 
+        _lastProjectPath = path;
         StatusMessage = missingFootprintNames.Count == 0
             ? $"Loaded project from {System.IO.Path.GetFileName(path)}."
             : $"Loaded project from {System.IO.Path.GetFileName(path)}. " +
@@ -1269,25 +1304,17 @@ public sealed class MainViewModel : ViewModelBase
     /// <summary>Header row for the NeoDen4 "stack" (feeder table) section - copied verbatim from
     /// the user's real NeoDenTemplate export, including its trailing unnamed/empty columns, so
     /// the generated file matches the exact 33-column layout the machine software expects.</summary>
-    private const string NeoDenStackHeader =
-        "#Feeder,Feeder ID,Type,Nozzle,X,Y,Angle,Footprint,Value,Pick height,Pick delay,Place Height,Place Delay," +
-        "Vacuum detection,Threshold,Vision Alignment,Speed,,,,,,,,,,,,,,,,";
+    private const string NeoDenStackHeader = NeoDenMachineDefaults.StackHeader;
 
     /// <summary>Fixed rows following the "mark" row, in the exact order/field-width (33 columns
     /// each, matching the stack rows) the user's real NeoDenTemplate export uses - none of these
     /// have their own header row, unlike "stack"/"comp". Copied verbatim. The "pcb" row (which
     /// precedes "mark" in the real template) is deliberately not included yet - not asked for.</summary>
-    private static readonly string[] NeoDenAfterMarkBoilerplateLines =
-    [
-        "markext,0,0.8,3,1,0,,,,,,,,,,,,,,,,,,,,,,,,,,,",
-        "markext,1,0.8,3,1,0,,,,,,,,,,,,,,,,,,,,,,,,,,,",
-        "test,No,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,",
-    ];
+    private static readonly string[] NeoDenAfterMarkBoilerplateLines = NeoDenMachineDefaults.AfterMarkBoilerplateLines;
 
     /// <summary>Header row for the "comp" (placement) section - copied verbatim from the real
     /// template, same 33-column width as everything else.</summary>
-    private const string NeoDenSmdHeader =
-        "#SMD,Feeder ID,Nozzle,Name,Value,Footprint,X,Y,Rotation,Skip,,,,,,,,,,,,,,,,,,,,,,,";
+    private const string NeoDenSmdHeader = NeoDenMachineDefaults.SmdHeader;
 
     /// <summary>Builds the "mark" row's 4 numeric fields from the first two fiducials on this
     /// side (X1, Y1, X2, Y2) - not actually boilerplate, per the user's correction: these are the
@@ -1303,7 +1330,7 @@ public sealed class MainViewModel : ViewModelBase
         // 7 real fields + 26 trailing empties = 33 total, matching the real template's "mark" row
         // width exactly (verified via `awk -F',' '{print NF}'` against the actual template file,
         // not hand-counted - see the lesson from getting this wrong once already this round).
-        var fields = new List<string> { "mark", "Whole", "Auto", x1.ToString("0.####"), y1.ToString("0.####"), x2.ToString("0.####"), y2.ToString("0.####") };
+        var fields = new List<string>(NeoDenMachineDefaults.MarkHead) { x1.ToString("0.####"), y1.ToString("0.####"), x2.ToString("0.####"), y2.ToString("0.####") };
         fields.AddRange(Enumerable.Repeat(string.Empty, 26));
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
@@ -1313,12 +1340,8 @@ public sealed class MainViewModel : ViewModelBase
     /// fixed literal copied from the real template. 10 real fields + 23 empty = 33.</summary>
     private static string BuildMirrorCreateLine(double firstX, double firstY)
     {
-        var fields = new List<string>
-        {
-            "mirror_create", "1", "1",
-            firstX.ToString("0.####"), firstY.ToString("0.####"),
-            "0", "0", "339.7", "134.57", "0.170895",
-        };
+        var fields = new List<string>(NeoDenMachineDefaults.MirrorCreateHead) { firstX.ToString("0.####"), firstY.ToString("0.####") };
+        fields.AddRange(NeoDenMachineDefaults.MirrorCreateTail);
         fields.AddRange(Enumerable.Repeat(string.Empty, 23));
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
@@ -1327,7 +1350,8 @@ public sealed class MainViewModel : ViewModelBase
     /// 5 real fields + 28 empty = 33.</summary>
     private static string BuildMirrorLine(double firstX, double firstY)
     {
-        var fields = new List<string> { "mirror", firstX.ToString("0.####"), firstY.ToString("0.####"), "0", "No" };
+        var fields = new List<string> { "mirror", firstX.ToString("0.####"), firstY.ToString("0.####") };
+        fields.AddRange(NeoDenMachineDefaults.MirrorTail);
         fields.AddRange(Enumerable.Repeat(string.Empty, 28));
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
@@ -1349,14 +1373,14 @@ public sealed class MainViewModel : ViewModelBase
         {
             "comp",
             component.FeederNumber?.ToString() ?? "",
-            "1", // Nozzle - always 1, per explicit instruction (the real template varies this, but the user overrode it)
+            NeoDenMachineDefaults.CompNozzle, // Nozzle - always 1, per explicit instruction (the real template varies this, but the user overrode it)
             component.Designator,
             component.Value ?? "",
             "", // Footprint - see summary above
             x.ToString("0.####"), // offset-translated (world/PnP-plus-offset), then Bottom-mirrored if the checkbox is on
             component.YMm.ToString("0.####"),
             component.RotationDegrees.ToString("0.####"), // reflects any spacebar rotation from the UI
-            "No", // Skip - always No, per explicit instruction
+            NeoDenMachineDefaults.CompSkip, // Skip - always No, per explicit instruction
         };
         fields.AddRange(Enumerable.Repeat(string.Empty, 23));
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
@@ -1435,11 +1459,24 @@ public sealed class MainViewModel : ViewModelBase
             {
                 try
                 {
-                    var mesh = TrayStlGenerator.BuildTray(component.SelectedFootprint, traySettings, component.Value);
+                    // Prefer the Component Library's own measured L/W/H for this Value over the
+                    // matched footprint's - falls back to the footprint's own dimensions,
+                    // unchanged, when there's no library entry for it. File naming/grouping still
+                    // key off the footprint's own name, only the pocket-sizing dimensions change.
+                    var effectiveFootprint = ComponentLibrary.ComponentLibraryLookup.ResolveEffectiveFootprint(component.SelectedFootprint, component.Value);
+                    var mesh = TrayStlGenerator.BuildTray(effectiveFootprint, traySettings, component.Value);
                     var labelPart = string.IsNullOrWhiteSpace(component.Value) ? "" : $"{component.Value}_";
                     var sanitizedName = string.Join("_", $"{labelPart}{component.SelectedFootprint.Name}".Split(System.IO.Path.GetInvalidFileNameChars()));
                     var trayPath = System.IO.Path.Combine(string.IsNullOrEmpty(directory) ? "." : directory, $"{nameNoExt}_Tray_{sanitizedName}.stl");
                     StlWriter.WriteAscii(trayPath, mesh);
+
+                    // One matching label-card DXF per tray STL - a 32x37mm box (a common
+                    // laser-cut/engraved label blank size) naming the part, with its Component
+                    // Library description underneath when this Value has a library entry.
+                    var labelCardPath = System.IO.Path.ChangeExtension(trayPath, ".dxf");
+                    var libraryEntry = ComponentLibrary.ComponentLibraryLookup.FindByValue(component.Value);
+                    Dxf.DxfWriter.WriteLabelCard(labelCardPath, 32, 37, component.Value, libraryEntry?.Description);
+
                     trayCount++;
                 }
                 catch (Exception)
@@ -1448,7 +1485,7 @@ public sealed class MainViewModel : ViewModelBase
                     // of the export - the CSVs/DXF already written above are still valid.
                 }
             }
-            trayNote = trayCount > 0 ? $" Wrote {trayCount} tray STL(s)." : "";
+            trayNote = trayCount > 0 ? $" Wrote {trayCount} tray STL(s) and matching label DXF(s)." : "";
         }
 
         StatusMessage = $"Wrote {System.IO.Path.GetFileName(topPath)} and {System.IO.Path.GetFileName(bottomPath)}.{skippedNote}{dxfNote}{trayNote}";
@@ -1494,7 +1531,7 @@ public sealed class MainViewModel : ViewModelBase
             if (feeder is null) { skipped++; continue; }
 
             var representative = Components.First(c => c.FeederNumber == feederId);
-            lines.Add(BuildLowBankStackRow(feederId, feeder, representative));
+            lines.Add(BuildLowBankStackRow(feederId, feeder, representative, ExportSettings.Current));
         }
 
         var trayFeederIds = Components
@@ -1509,7 +1546,7 @@ public sealed class MainViewModel : ViewModelBase
             if (tray is null) { skipped++; continue; }
 
             var representative = Components.First(c => c.FeederNumber == feederId);
-            lines.Add(BuildTrayFeederStackRow(feederId, tray, representative));
+            lines.Add(BuildTrayFeederStackRow(feederId, tray, representative, ExportSettings.Current));
         }
 
         var fiducials = side == BoardSide.Top ? TopFiducials : BottomFiducials;
@@ -1539,37 +1576,28 @@ public sealed class MainViewModel : ViewModelBase
         return skipped;
     }
 
-    private static string BuildLowBankStackRow(int feederId, TapeFeederSettingViewModel feeder, ComponentViewModel representative)
+    private static string BuildLowBankStackRow(int feederId, TapeFeederSettingViewModel feeder, ComponentViewModel representative, NeoDenExportSettings settings)
     {
-        var type = feederId < 50 ? 0 : 1;
-        var angle = feederId < 20 ? 90 : -90;
-        const double pickHeightMm = 0.5;
-        const int pickDelayMs = 200;
-        var placeHeightMm = 3.2 + representative.SelectedFootprint.HeightMm;
-        const int placeDelayMs = 100;
+        var placeHeightMm = settings.TapePlaceHeightBaseMm + representative.SelectedFootprint.HeightMm;
 
-        var fields = new[]
+        var fields = new List<string>
         {
             "stack",
             feederId.ToString(),
-            type.ToString(),
-            "1", // Nozzle - always 1 for now
+            NeoDenMachineDefaults.TapeType(feederId).ToString(),
+            NeoDenMachineDefaults.Nozzle,
             feeder.X.ToString("0.####"),
             feeder.Y.ToString("0.####"),
-            angle.ToString(),
+            NeoDenMachineDefaults.TapeAngle(feederId).ToString(),
             representative.SelectedFootprint.Name,
             representative.Value ?? "",
-            pickHeightMm.ToString("0.#"),
-            pickDelayMs.ToString(),
+            NeoDenMachineDefaults.TapePickHeight.ToString("0.#"),
+            settings.PickDelayMs.ToString(),
             placeHeightMm.ToString("0.####"),
-            placeDelayMs.ToString(),
-            // Everything below is not yet computed from anything - copied as literal
-            // defaults from the user's real example row (feeder 1, a low-bank row) rather
-            // than guessed at, per their explicit "all other values should be as they are
-            // in the example CSV" instruction.
-            "No", "-40", "1", "40", "4", "50", "50", "No", "No",
-            "-40", "-40", "-40", "-40", "-1", "-1", "0", "0", "", "", "",
+            settings.PlaceDelayMs.ToString(),
         };
+        // Fields 14-33: literal defaults copied from the user's real example row (feeder 1).
+        fields.AddRange(NeoDenMachineDefaults.TapeTail);
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
 
@@ -1580,33 +1608,32 @@ public sealed class MainViewModel : ViewModelBase
     /// populated from the assigned component the same way <see cref="BuildLowBankStackRow"/>
     /// does - the pattern's own example happened to show these blank, but the user asked
     /// afterward for them to be filled in here too, matching the low-bank behavior.</summary>
-    private static string BuildTrayFeederStackRow(int feederId, TrayFeederSettingViewModel tray, ComponentViewModel representative)
+    private static string BuildTrayFeederStackRow(int feederId, TrayFeederSettingViewModel tray, ComponentViewModel representative, NeoDenExportSettings settings)
     {
-        var placeHeightMm = representative.SelectedFootprint.HeightMm + 1.7;
+        var placeHeightMm = representative.SelectedFootprint.HeightMm + NeoDenMachineDefaults.TrayPlaceHeightBase;
 
-        var fields = new[]
+        var fields = new List<string>
         {
             "stack",
             feederId.ToString(),
-            "1", // Type
-            "1", // Nozzle
+            NeoDenMachineDefaults.TrayType,
+            NeoDenMachineDefaults.Nozzle,
             tray.BeginX.ToString("0.####"),
             tray.BeginY.ToString("0.####"),
-            "0", // Angle
+            NeoDenMachineDefaults.TrayAngle,
             representative.SelectedFootprint.Name,
             representative.Value ?? "",
-            "1.7", // Pick height
-            "200", // Pick delay
-            placeHeightMm.ToString("0.####"), // Place Height
-            "100", // Place Delay
-            "Yes", "-40", "1", "40",
-            tray.Columns.ToString(),
-            tray.Rows.ToString(),
-            tray.EndX.ToString("0.####"),
-            tray.EndY.ToString("0.####"),
-            "1", "1", "No", "No",
-            "-40", "-40", "-40", "-40", "-1", "-1", "0", "0",
+            NeoDenMachineDefaults.TrayPickHeight.ToString("0.#"),
+            settings.PickDelayMs.ToString(),
+            placeHeightMm.ToString("0.####"),
+            settings.PlaceDelayMs.ToString(),
         };
+        fields.AddRange(NeoDenMachineDefaults.TrayHead);
+        fields.Add(tray.Columns.ToString());
+        fields.Add(tray.Rows.ToString());
+        fields.Add(tray.EndX.ToString("0.####"));
+        fields.Add(tray.EndY.ToString("0.####"));
+        fields.AddRange(NeoDenMachineDefaults.TrayTail);
         return string.Join(",", fields.Select(EscapeNeoDenCsvField));
     }
 
@@ -1618,7 +1645,7 @@ public sealed class MainViewModel : ViewModelBase
     /// <summary>Assigns a NeoDen4 feeder slot number to every BOM component, grouping by
     /// (Value, Footprint) so parts sharing one physical reel share one feeder number - matching
     /// how the NeoDen4 template's own "stack" (feeder) table works, where many placements
-    /// reference the same Feeder ID. Unchecked groups pull from the low bank (1-40); groups
+    /// reference the same Feeder ID. Unchecked groups pull from the low bank (tape feeders 1-49); groups
     /// where any member has <see cref="ComponentViewModel.UseTrayFeeder"/> checked pull from
     /// the tray-feeder bank (54-99) instead, and every member of the group is synced to that same
     /// checkbox state and feeder number. Only numbers with a real physical position on the
@@ -1626,7 +1653,9 @@ public sealed class MainViewModel : ViewModelBase
     /// lists below.</summary>
     private void AutoAssignFeeders()
     {
-        const int lowStart = 1, lowEnd = 40;
+        // Tape feeders 1-49: everything below the NeoDen "Type" split (50) - not just 1-40, so
+        // feeders added beyond 40 (41, 42, ...) are handed out too.
+        const int lowStart = 1, lowEnd = 49;
         const int highStart = 54, highEnd = 99;
 
         if (Components.Count == 0)
@@ -1639,7 +1668,7 @@ public sealed class MainViewModel : ViewModelBase
 
         // Walk only feeder numbers that actually have a row in TapeFeederSettings/
         // TrayFeederSettings - previously this just incremented a raw integer counter through the
-        // whole 1-40/54-99 range, which could (and, once feeders became deletable, reliably did)
+        // whole 1-49/54-99 range, which could (and, once feeders became deletable, reliably did)
         // hand out numbers with no physical position at all. Skipping straight to the next VALID
         // number, rather than the next integer, is what actually fixes that.
         var validLowNumbers = TapeFeederSettings
@@ -1747,6 +1776,10 @@ public sealed class MainViewModel : ViewModelBase
 
     private static PointMm Translate(PointMm p, PointMm offset) => new(p.X + offset.X, p.Y + offset.Y);
 
+    private bool _typedYIsNegated;
+
+    private (double X, double Y, bool NegateTypedY) CurrentBoardOffset() => (_boardOffsetX, _boardOffsetY, _typedYIsNegated);
+
     private static bool IsFiducial(string designator, string? value) =>
         designator.Contains("FID", StringComparison.OrdinalIgnoreCase) ||
         (value?.Contains("Fiducial", StringComparison.OrdinalIgnoreCase) ?? false);
@@ -1761,6 +1794,27 @@ public sealed class MainViewModel : ViewModelBase
     private double MirrorXIfBottom(double untranslatedX, BoardSide side) =>
         side == BoardSide.Bottom ? 2 * (_boardCenterX - _boardOffsetX) - untranslatedX : untranslatedX;
 
+    /// <summary>Paste's fixed, non-editable look - a subtle metallic sheen rather than a flat
+    /// fill, since real solder paste stencil openings read as shiny on a board photo. Frozen
+    /// (unlike LayerColors' brushes) since nothing ever mutates it - every Paste layer/component
+    /// gets its own fresh instance rather than sharing one, so freezing here is safe.</summary>
+    private static Brush BuildShinyGoldBrush()
+    {
+        var gradient = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xB8, 0x86, 0x0B), 0.0));  // dark goldenrod - depth
+        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xD7, 0x00), 0.3));  // rich gold
+        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xFF, 0xF0), 0.5));  // near-white specular highlight
+        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xFF, 0xD7, 0x00), 0.7));  // rich gold
+        gradient.GradientStops.Add(new GradientStop(Color.FromRgb(0xB8, 0x86, 0x0B), 1.0));  // dark goldenrod - depth
+        gradient.Freeze();
+        return gradient;
+    }
+
+    /// <summary>A plain, frozen stand-in for the Layers panel's own swatch - the gradient itself
+    /// has no single color a tiny 14x14 swatch could usefully show, so the swatch shows this
+    /// representative flat gold instead (matching the gradient's own mid-tone).</summary>
+    private static readonly Brush ShinyGoldSwatchColor = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xD7, 0x00)));
+
     private static string DefaultNameFor(GerberLayerRole role) => role switch
     {
         GerberLayerRole.TopPaste => "Top Paste",
@@ -1769,16 +1823,6 @@ public sealed class MainViewModel : ViewModelBase
         GerberLayerRole.BottomSoldermask => "Bottom Soldermask",
         GerberLayerRole.Outline => "Outline",
         _ => role.ToString(),
-    };
-
-    private static Brush DefaultColorFor(GerberLayerRole role) => role switch
-    {
-        GerberLayerRole.TopPaste => BuildShinyGoldBrush(),
-        GerberLayerRole.BottomPaste => BuildShinyGoldBrush(),
-        GerberLayerRole.TopSoldermask => Brushes.White,
-        GerberLayerRole.BottomSoldermask => Brushes.White,
-        GerberLayerRole.Outline => GerberRenderer.PcbGreen,
-        _ => Brushes.Gray,
     };
 
     private static bool IsBottomRole(GerberLayerRole role) =>

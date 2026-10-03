@@ -19,10 +19,11 @@
 
         <Menu Grid.Row="0">
             <MenuItem Header="_File">
-                <MenuItem Header="_Save Project..." Command="{Binding SaveProjectCommand}"/>
+                <MenuItem Header="_Save Project..." Command="{Binding SaveProjectCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem Header="_Load Project..." Command="{Binding LoadProjectCommand}"/>
                 <Separator/>
                 <MenuItem Header="Manage _Footprint Library..." Click="ManageFootprintLibrary_Click"/>
+                <MenuItem Header="Manage _Component Library..." Click="ManageComponentLibrary_Click"/>
             </MenuItem>
             <MenuItem Header="_Settings">
                 <MenuItem Header="_Tape Feeder Positions" Click="TapeFeederPositions_Click"/>
@@ -67,7 +68,20 @@
                                 <DataTemplate x:Key="LayerRowTemplate">
                                     <StackPanel Orientation="Horizontal" Margin="4,4">
                                         <CheckBox IsChecked="{Binding IsVisible}" VerticalAlignment="Center"/>
-                                        <Rectangle Width="14" Height="14" Fill="{Binding Color}" Margin="6,0" VerticalAlignment="Center"/>
+                                        <Rectangle Width="14" Height="14" Fill="{Binding Color}" Margin="6,0" VerticalAlignment="Center"
+                                                   MouseLeftButtonDown="LayerColorSwatch_MouseLeftButtonDown">
+                                            <Rectangle.Style>
+                                                <Style TargetType="Rectangle">
+                                                    <Setter Property="ToolTip" Value="Fixed color - always a shiny gold, not editable"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsColorEditable}" Value="True">
+                                                            <Setter Property="Cursor" Value="Hand"/>
+                                                            <Setter Property="ToolTip" Value="Click to change this layer's color"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Rectangle.Style>
+                                        </Rectangle>
                                         <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </DataTemplate>
@@ -120,9 +134,9 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBox Grid.Column="0" Text="{Binding Designator, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,2,0"/>
                                             <TextBlock Grid.Column="1" Text="X:" VerticalAlignment="Center"/>
-                                            <TextBox Grid.Column="2" Text="{Binding X, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}" Margin="0,0,4,0"/>
+                                            <TextBox Grid.Column="2" Text="{Binding TypedX, UpdateSourceTrigger=LostFocus, StringFormat=F4}" KeyDown="FiducialCoordinate_KeyDown" Margin="0,0,4,0"/>
                                             <TextBlock Grid.Column="3" Text="Y:" VerticalAlignment="Center"/>
-                                            <TextBox Grid.Column="4" Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}"/>
+                                            <TextBox Grid.Column="4" Text="{Binding TypedY, UpdateSourceTrigger=LostFocus, StringFormat=F4}" KeyDown="FiducialCoordinate_KeyDown"/>
                                             <Button Grid.Column="5" Content="x" Padding="0" FontSize="10" Margin="2,0,0,0"
                                                     Command="{Binding DataContext.RemoveFiducialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding}"/>
@@ -153,9 +167,9 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBox Grid.Column="0" Text="{Binding Designator, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,2,0"/>
                                             <TextBlock Grid.Column="1" Text="X:" VerticalAlignment="Center"/>
-                                            <TextBox Grid.Column="2" Text="{Binding X, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}" Margin="0,0,4,0"/>
+                                            <TextBox Grid.Column="2" Text="{Binding TypedX, UpdateSourceTrigger=LostFocus, StringFormat=F4}" KeyDown="FiducialCoordinate_KeyDown" Margin="0,0,4,0"/>
                                             <TextBlock Grid.Column="3" Text="Y:" VerticalAlignment="Center"/>
-                                            <TextBox Grid.Column="4" Text="{Binding Y, UpdateSourceTrigger=PropertyChanged, StringFormat=F4}"/>
+                                            <TextBox Grid.Column="4" Text="{Binding TypedY, UpdateSourceTrigger=LostFocus, StringFormat=F4}" KeyDown="FiducialCoordinate_KeyDown"/>
                                             <Button Grid.Column="5" Content="x" Padding="0" FontSize="10" Margin="2,0,0,0"
                                                     Command="{Binding DataContext.RemoveFiducialCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     CommandParameter="{Binding}"/>
@@ -182,6 +196,7 @@
                              so imported board content draws on top of it. -->
                         <Canvas x:Name="FixturesHost" RenderTransformOrigin="0,0" IsHitTestVisible="False"/>
                         <Canvas x:Name="LayerHost" RenderTransformOrigin="0,0"/>
+                        <Canvas x:Name="FiducialsHost" RenderTransformOrigin="0,0" IsHitTestVisible="False"/>
                     </Grid>
                 </Border>
 
@@ -266,7 +281,7 @@
                             ToolTip="Select two or more rows (Ctrl/Shift-click) and combine them into one feeder row."/>
                     <Button Content="Undo Combine (Ctrl+Z)" Click="UndoCombine_Click" IsEnabled="{Binding CanUndoCombine}" Padding="8,2" Margin="8,0,0,0"/>
                     <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"
-                               Text="Unchecked parts: feeders 1-40.  Checked (tray feeder) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
+                               Text="Unchecked parts: tape feeders 1-49 (any that has a position on the Settings tab).  Checked (tray feeder) parts: feeders 54-99.  Parts sharing the same Value+Footprint share one feeder."/>
                 </StackPanel>
                 <DataGrid x:Name="FeederSetupDataGrid" ItemsSource="{Binding BomGroups}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" RowHeaderWidth="0">
                     <DataGrid.Resources>
@@ -402,6 +417,88 @@
                                Text="Variables used to build a tray-feeder parts tray STL when 'Create NeoDen4 File...' runs."/>
                 </StackPanel>
             </Grid>
+        </TabItem>
+        <TabItem Header="Machine Settings">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="12" Grid.IsSharedSizeScope="True">
+                    <TextBlock Text="NeoDen4 CSV - what 'Create NeoDen4 File...' writes" FontWeight="Bold" FontSize="14"/>
+                    <TextBlock Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,12"
+                               Text="Sections follow the CSV, top to bottom. Every row is 33 fields wide. Plain values are fixed numbers written the same way every time (the last column says how each was set); italic values come from your project - BOM, Settings tab, fiducials."/>
+                    <GroupBox Header="Editable values" Margin="0,0,0,16" Padding="8">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="Pick delay" VerticalAlignment="Center" Margin="0,0,12,4"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ExportSettings.PickDelayMs}" Margin="0,0,0,4"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="stack rows, field 11 - tape and tray (default 200)" Foreground="Gray" VerticalAlignment="Center" Margin="12,0,0,4"/>
+                                <TextBlock Grid.Row="1" Text="Place delay" VerticalAlignment="Center" Margin="0,0,12,4"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ExportSettings.PlaceDelayMs}" Margin="0,0,0,4"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="stack rows, field 13 - tape and tray (default 100)" Foreground="Gray" VerticalAlignment="Center" Margin="12,0,0,4"/>
+                                <TextBlock Grid.Row="2" Text="Place height base" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ExportSettings.TapePlaceHeightBaseMm}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="tape rows only, field 12: this + footprint height (default 3.2)" Foreground="Gray" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                            </Grid>
+                            <TextBlock Foreground="Gray" Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Text="Saved as soon as you leave the box, and used the next time you press Create NeoDen4 File... The tray Place height (footprint height + 1.7) is not affected."/>
+                        </StackPanel>
+                    </GroupBox>
+                    <ItemsControl ItemsSource="{Binding MachineSettings}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,0,18">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="{Binding Description}" Foreground="Gray" FontFamily="Consolas" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,2,0,6"/>
+                                    <Grid Margin="0,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="F"/>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="C"/>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="V"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Field" Foreground="Gray" FontSize="11" Margin="0,0,14,0"/>
+                                        <TextBlock Grid.Column="1" Text="CSV column" Foreground="Gray" FontSize="11" Margin="0,0,14,0"/>
+                                        <TextBlock Grid.Column="2" Text="Value" Foreground="Gray" FontSize="11" Margin="0,0,14,0"/>
+                                        <TextBlock Grid.Column="3" Text="How it is set" Foreground="Gray" FontSize="11"/>
+                                    </Grid>
+                                    <ItemsControl ItemsSource="{Binding Rows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,1">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" SharedSizeGroup="F"/>
+                                                        <ColumnDefinition Width="Auto" SharedSizeGroup="C"/>
+                                                        <ColumnDefinition Width="Auto" SharedSizeGroup="V"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding Field}" Margin="0,0,14,0"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Column}" Margin="0,0,14,0"/>
+                                                    <TextBlock x:Name="ValueText" Grid.Column="2" Text="{Binding Value}" FontFamily="Consolas" Margin="0,0,14,0"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding Source}" TextWrapping="Wrap"/>
+                                                </Grid>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding IsComputed}" Value="True">
+                                                        <Setter TargetName="ValueText" Property="FontStyle" Value="Italic"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
         </TabControl>
 

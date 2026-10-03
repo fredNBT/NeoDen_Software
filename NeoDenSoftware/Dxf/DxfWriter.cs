@@ -61,4 +61,109 @@ public static class DxfWriter
 
         File.WriteAllText(path, sb.ToString());
     }
+
+    /// <summary>Rough average glyph width as a fraction of text height, used only to estimate
+    /// whether a string will overflow the card - there's no real font here to measure against
+    /// (unlike the tray STL's own label, which cuts actual glyph geometry and so measures its own
+    /// vector outlines - a DXF TEXT entity just names a string and leaves rendering to whatever
+    /// opens the file).</summary>
+    private const double AverageCharWidthFactor = 0.6;
+
+    /// <summary>Writes a small standalone DXF "label card" to accompany one tray STL: a
+    /// <paramref name="widthMm"/> x <paramref name="heightMm"/> rectangle (corners at the origin,
+    /// same closed-<c>POLYLINE</c> style as <see cref="WriteOutline"/>) containing the component's
+    /// own name, centered, plus its Component Library description underneath when one exists -
+    /// both as native DXF <c>TEXT</c> entities (center/middle justified), so the viewer's own font
+    /// renders the glyphs - no font rendering happens here. Each line's height auto-shrinks (down
+    /// to a 0.5mm floor) from its own cap when <see cref="AverageCharWidthFactor"/> estimates it
+    /// would otherwise overflow the card's width, the same "shrink to fit, never omit" spirit as
+    /// the tray STL's own label. Either <paramref name="name"/> or <paramref name="description"/>
+    /// can be null/blank (e.g. a BOM row with no Value) - a blank one is simply skipped rather than
+    /// leaving an empty TEXT entity, and the other still gets centered in the card on its own.</summary>
+    public static void WriteLabelCard(string path, double widthMm, double heightMm, string? name, string? description)
+    {
+        var sb = new StringBuilder();
+
+        void Code(int code, string value) => sb.Append(code).Append('\n').Append(value).Append('\n');
+        void CodeD(int code, double value) => Code(code, value.ToString("F6", CultureInfo.InvariantCulture));
+
+        Code(0, "SECTION");
+        Code(2, "HEADER");
+        Code(9, "$ACADVER");
+        Code(1, "AC1009");
+        Code(9, "$INSUNITS");
+        Code(70, "4"); // 4 = millimeters
+        Code(0, "ENDSEC");
+
+        Code(0, "SECTION");
+        Code(2, "ENTITIES");
+
+        Code(0, "POLYLINE");
+        Code(8, "Border");
+        Code(66, "1");
+        Code(70, "1"); // closed
+        foreach (var (x, y) in new (double X, double Y)[] { (0, 0), (widthMm, 0), (widthMm, heightMm), (0, heightMm) })
+        {
+            Code(0, "VERTEX");
+            Code(8, "Border");
+            CodeD(10, x);
+            CodeD(20, y);
+        }
+        Code(0, "SEQEND");
+
+        void WriteCenteredText(string text, double centerX, double centerY, double textHeightMm)
+        {
+            Code(0, "TEXT");
+            Code(8, "Label");
+            CodeD(10, centerX);
+            CodeD(20, centerY);
+            CodeD(40, textHeightMm);
+            Code(1, text);
+            Code(72, "1"); // horizontal justification: center
+            CodeD(11, centerX);
+            CodeD(21, centerY);
+            Code(73, "2"); // vertical justification: middle
+        }
+
+        double FitTextHeight(string text, double maxHeightMm, double availableWidthMm)
+        {
+            var length = text.Trim().Length;
+            if (length == 0) return maxHeightMm;
+            var estimatedWidth = length * AverageCharWidthFactor * maxHeightMm;
+            return estimatedWidth <= availableWidthMm ? maxHeightMm : Math.Max(availableWidthMm / (length * AverageCharWidthFactor), 0.5);
+        }
+
+        const double margin = 2.0;
+        const double lineGap = 2.0;
+        const double maxNameHeightMm = 5.0;
+        const double maxDescriptionHeightMm = 3.0;
+        var availableWidth = Math.Max(widthMm - margin * 2, 1.0);
+        var centerX = widthMm / 2;
+        var centerY = heightMm / 2;
+
+        var hasName = !string.IsNullOrWhiteSpace(name);
+        var hasDescription = !string.IsNullOrWhiteSpace(description);
+
+        if (hasName && hasDescription)
+        {
+            var nameHeight = FitTextHeight(name!, maxNameHeightMm, availableWidth);
+            var descriptionHeight = FitTextHeight(description!, maxDescriptionHeightMm, availableWidth);
+            var stackHeight = nameHeight + lineGap + descriptionHeight;
+            WriteCenteredText(name!, centerX, centerY + stackHeight / 2 - nameHeight / 2, nameHeight);
+            WriteCenteredText(description!, centerX, centerY - stackHeight / 2 + descriptionHeight / 2, descriptionHeight);
+        }
+        else if (hasName)
+        {
+            WriteCenteredText(name!, centerX, centerY, FitTextHeight(name!, maxNameHeightMm, availableWidth));
+        }
+        else if (hasDescription)
+        {
+            WriteCenteredText(description!, centerX, centerY, FitTextHeight(description!, maxDescriptionHeightMm, availableWidth));
+        }
+
+        Code(0, "ENDSEC");
+        Code(0, "EOF");
+
+        File.WriteAllText(path, sb.ToString());
+    }
 }

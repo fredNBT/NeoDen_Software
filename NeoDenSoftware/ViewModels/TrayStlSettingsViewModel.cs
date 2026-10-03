@@ -21,6 +21,10 @@ public sealed class TrayStlSettingsViewModel : ViewModelBase
     private double _grooveDepthMm;
     private double _textDepthMm;
     private double _textHeightMm;
+    private double _componentCutoutSizeMm;
+    private double _mountingHoleDiameterMm;
+    private double _mountingHoleInsetMm;
+    private double _pocketCenterHoleDiameterMm;
     private string? _statusMessage;
 
     public double BoxLengthMm
@@ -86,6 +90,40 @@ public sealed class TrayStlSettingsViewModel : ViewModelBase
         set => SetField(ref _textHeightMm, value);
     }
 
+    /// <summary>Side length of the small square notch above and below each pocket, flush
+    /// against (merged into) the pocket's own edge, same depth as the pocket - a fingernail catch
+    /// reaching into the pocket to lift the part out. 0 disables it entirely.</summary>
+    public double ComponentCutoutSizeMm
+    {
+        get => _componentCutoutSizeMm;
+        set => SetField(ref _componentCutoutSizeMm, value);
+    }
+
+    /// <summary>Diameter of the two round mounting holes drilled all the way through the
+    /// tray, one inset from the left edge and one from the right (see <see cref="MountingHoleInsetMm"/>),
+    /// both vertically centered. 0 disables them entirely.</summary>
+    public double MountingHoleDiameterMm
+    {
+        get => _mountingHoleDiameterMm;
+        set => SetField(ref _mountingHoleDiameterMm, value);
+    }
+
+    /// <summary>Distance from each end of the tray to that hole's own center.</summary>
+    public double MountingHoleInsetMm
+    {
+        get => _mountingHoleInsetMm;
+        set => SetField(ref _mountingHoleInsetMm, value);
+    }
+
+    /// <summary>Diameter of the round hole through the middle of each pocket, straight through
+    /// the whole tray. Skipped for a pocket individually (not for the whole tray) if it's wider
+    /// than that pocket's own footprint-sized opening. 0 disables it entirely.</summary>
+    public double PocketCenterHoleDiameterMm
+    {
+        get => _pocketCenterHoleDiameterMm;
+        set => SetField(ref _pocketCenterHoleDiameterMm, value);
+    }
+
     public string? StatusMessage
     {
         get => _statusMessage;
@@ -107,6 +145,10 @@ public sealed class TrayStlSettingsViewModel : ViewModelBase
         _grooveDepthMm = settings.GrooveDepthMm;
         _textDepthMm = settings.TextDepthMm;
         _textHeightMm = settings.TextHeightMm;
+        _componentCutoutSizeMm = settings.ComponentCutoutSizeMm;
+        _mountingHoleDiameterMm = settings.MountingHoleDiameterMm;
+        _mountingHoleInsetMm = settings.MountingHoleInsetMm;
+        _pocketCenterHoleDiameterMm = settings.PocketCenterHoleDiameterMm;
 
         SaveCommand = new RelayCommand(_ => Save());
     }
@@ -125,7 +167,7 @@ public sealed class TrayStlSettingsViewModel : ViewModelBase
             return;
         }
 
-        if (ExtraLengthMm < 0 || ExtraWidthMm < 0 || GrooveWidthMm < 0 || GrooveDepthMm < 0 || TextDepthMm < 0)
+        if (ExtraLengthMm < 0 || ExtraWidthMm < 0 || GrooveWidthMm < 0 || GrooveDepthMm < 0 || TextDepthMm < 0 || ComponentCutoutSizeMm < 0 || MountingHoleDiameterMm < 0 || MountingHoleInsetMm < 0 || PocketCenterHoleDiameterMm < 0)
         {
             StatusMessage = "Clearance/groove/text values can't be negative.";
             return;
@@ -139,7 +181,7 @@ public sealed class TrayStlSettingsViewModel : ViewModelBase
 
         TrayStlSettingsStore.Save(new TrayStlSettings(
             BoxLengthMm, BoxWidthMm, BoxHeightMm, PocketCount, ExtraLengthMm, ExtraWidthMm, GrooveWidthMm, GrooveDepthMm,
-            TextDepthMm, TextHeightMm));
+            TextDepthMm, TextHeightMm, ComponentCutoutSizeMm, MountingHoleDiameterMm, MountingHoleInsetMm, PocketCenterHoleDiameterMm));
         StatusMessage = "Saved.";
     }
 }

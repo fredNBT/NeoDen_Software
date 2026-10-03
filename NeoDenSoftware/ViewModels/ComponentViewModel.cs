@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using NeoDenSoftware.ComponentLibrary;
 using NeoDenSoftware.Footprints;
 using NeoDenSoftware.Models;
 using NeoDenSoftware.Rendering;
@@ -47,7 +48,7 @@ public sealed class ComponentViewModel : ViewModelBase
     }
 
     /// <summary>When checked, auto-assign pulls this part's feeder number from the tray-feeder
-    /// bank (54-99) instead of the default tape-feeder bank (1-40) - e.g. for tray/large-component
+    /// bank (54-99) instead of the default tape-feeder bank (1-49) - e.g. for tray/large-component
     /// feeders.</summary>
     public bool UseTrayFeeder
     {
@@ -134,7 +135,7 @@ public sealed class ComponentViewModel : ViewModelBase
         Canvas.SetTop(hitRect, -hitWidth / 2);
         Visual.Children.Add(hitRect);
 
-        var color = Side == BoardSide.Top ? Brushes.DeepSkyBlue : Brushes.Orange;
+        var color = Side == BoardSide.Top ? LayerColors.For(GerberLayerRole.TopComponents) : LayerColors.For(GerberLayerRole.BottomComponents);
         Visual.Children.Add(BuildFootprintContent(color));
     }
 
@@ -143,20 +144,25 @@ public sealed class ComponentViewModel : ViewModelBase
         PreviewHost.Children.Clear();
         PreviewHost.Children.Add(new Rectangle { Width = PreviewSize, Height = PreviewSize, Fill = GerberRenderer.CanvasBackground });
 
-        var preview = BuildScaledPreview(PreviewSize - 4, Brushes.DeepSkyBlue);
+        var preview = BuildScaledPreview(PreviewSize - 4, LayerColors.For(GerberLayerRole.TopComponents));
         Canvas.SetLeft(preview, 2);
         Canvas.SetTop(preview, 2);
         PreviewHost.Children.Add(preview);
     }
 
     /// <summary>Builds a fresh drawing of the currently selected footprint (or a cross, if
-    /// unmatched) - used for both the persistent visuals above and one-off previews like the
-    /// click-selection info panel (a UIElement can only be parented once, so callers that need
-    /// their own copy should call this rather than reuse <see cref="Visual"/> or <see cref="PreviewHost"/>).</summary>
-    public UIElement BuildFootprintContent(Brush color) =>
-        SelectedFootprint.Name == FootprintLibrary.NoMatch.Name
+    /// unmatched AND there's no Component Library photo to show instead - see
+    /// <see cref="ComponentLibrary.ComponentLibraryLookup.ResolveDisplayFootprint"/>) - used for
+    /// both the persistent visuals above and one-off previews like the click-selection info panel
+    /// (a UIElement can only be parented once, so callers that need their own copy should call
+    /// this rather than reuse <see cref="Visual"/> or <see cref="PreviewHost"/>).</summary>
+    public UIElement BuildFootprintContent(Brush color)
+    {
+        var displayFootprint = ComponentLibraryLookup.ResolveDisplayFootprint(SelectedFootprint, Value);
+        return SelectedFootprint.Name == FootprintLibrary.NoMatch.Name && displayFootprint.ImagePath is null
             ? FootprintRenderer.BuildCrossVisual(2.0)
-            : FootprintRenderer.BuildComponentVisual(SelectedFootprint, color);
+            : FootprintRenderer.BuildComponentVisual(displayFootprint, color);
+    }
 
     /// <summary>Builds a fixed-size (<paramref name="boxSizeMm"/> x boxSizeMm), centered,
     /// scaled-to-fit preview of the current footprint. Deliberately does not use a Viewbox:

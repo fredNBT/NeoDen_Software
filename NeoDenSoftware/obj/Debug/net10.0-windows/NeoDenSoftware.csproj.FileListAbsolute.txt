@@ -36,4 +36,11 @@ C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Th
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.baml
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\AppearanceSettingsWindow.g.cs
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Themes\VsDark.baml
+C:\Users\fred\AppData\Local\Temp\claude\C--Users-fred-Desktop-NeoDenSoftware\7876ef06-7854-4af6-a90f-95687a3a645b\scratchpad\buildout\NeoDenSoftware.exe
+C:\Users\fred\AppData\Local\Temp\claude\C--Users-fred-Desktop-NeoDenSoftware\7876ef06-7854-4af6-a90f-95687a3a645b\scratchpad\buildout\NeoDenSoftware.deps.json
+C:\Users\fred\AppData\Local\Temp\claude\C--Users-fred-Desktop-NeoDenSoftware\7876ef06-7854-4af6-a90f-95687a3a645b\scratchpad\buildout\NeoDenSoftware.runtimeconfig.json
+C:\Users\fred\AppData\Local\Temp\claude\C--Users-fred-Desktop-NeoDenSoftware\7876ef06-7854-4af6-a90f-95687a3a645b\scratchpad\buildout\NeoDenSoftware.dll
+C:\Users\fred\AppData\Local\Temp\claude\C--Users-fred-Desktop-NeoDenSoftware\7876ef06-7854-4af6-a90f-95687a3a645b\scratchpad\buildout\NeoDenSoftware.pdb
 C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\NeoDenSo.44D713D8.Up2Date
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\ComponentLibraryWindow.g.cs
+C:\Users\fred\Desktop\NeoDenSoftware\NeoDenSoftware\obj\Debug\net10.0-windows\Views\ComponentLibraryWindow.baml

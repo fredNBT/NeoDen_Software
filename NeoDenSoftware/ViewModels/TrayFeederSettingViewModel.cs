@@ -146,6 +146,12 @@ public sealed class TrayFeederSettingViewModel : ViewModelBase
         _imagesHost.Children.Clear();
         if (_assignedFootprint is null || Columns <= 0) return;
 
+        // Prefer the Component Library's own photo for this Value over the matched footprint's
+        // generic silhouette - same resolution ComponentViewModel.BuildFootprintContent already
+        // uses for on-board rendering, so a part with a library photo looks the same on the tray
+        // feeder row as it does on the board itself.
+        var displayFootprint = ComponentLibrary.ComponentLibraryLookup.ResolveDisplayFootprint(_assignedFootprint, _assignedValue);
+
         for (var i = 0; i < Columns; i++)
         {
             // A single column has nowhere to "spread" to - anchor it at the start point, same as
@@ -153,9 +159,9 @@ public sealed class TrayFeederSettingViewModel : ViewModelBase
             // across the full BeginX..EndX span, inclusive of both endpoints.
             var x = Columns == 1 ? BeginX : BeginX + i * (EndX - BeginX) / (Columns - 1);
 
-            UIElement content = _assignedFootprint.Name == FootprintLibrary.NoMatch.Name
+            UIElement content = _assignedFootprint.Name == FootprintLibrary.NoMatch.Name && displayFootprint.ImagePath is null
                 ? FootprintRenderer.BuildCrossVisual(2.0)
-                : FootprintRenderer.BuildComponentVisual(_assignedFootprint, Brushes.DeepSkyBlue);
+                : FootprintRenderer.BuildComponentVisual(displayFootprint, Brushes.DeepSkyBlue);
             content.RenderTransform = new TranslateTransform(x, BeginY);
             _imagesHost.Children.Add(content);
         }

@@ -21,4 +21,8 @@ public sealed record TrayStlSettings(
     double GrooveWidthMm = 2,
     double GrooveDepthMm = 2,
     double TextDepthMm = 1,
-    double TextHeightMm = 4);
+    double TextHeightMm = 4,
+    double ComponentCutoutSizeMm = 1,
+    double MountingHoleDiameterMm = 2.5,
+    double MountingHoleInsetMm = 3,
+    double PocketCenterHoleDiameterMm = 1.5);

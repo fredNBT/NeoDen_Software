@@ -55,6 +55,9 @@ public partial class MainWindow : Window
             FixturesHost.Children.Add(tray.Visual);
         _viewModel.TrayFeederSettings.CollectionChanged += TrayFeederSettings_CollectionChanged;
 
+        _viewModel.TopFiducials.CollectionChanged += (_, _) => RebuildFiducialMarks();
+        _viewModel.BottomFiducials.CollectionChanged += (_, _) => RebuildFiducialMarks();
+
         ViewportBorder.Background = GerberRenderer.CanvasBackground;
         UpdateTransform();
 
@@ -65,9 +68,56 @@ public partial class MainWindow : Window
         Loaded += (_, _) => OnLayersImported(this, _viewModel.AllFixtureBounds);
     }
 
+    private void RebuildFiducialMarks()
+    {
+        FiducialsHost.Children.Clear();
+        foreach (var fiducial in _viewModel.TopFiducials.Concat(_viewModel.BottomFiducials))
+            FiducialsHost.Children.Add(fiducial.Visual);
+    }
+
+    // The X/Y boxes commit on LostFocus (not per keystroke - adding the board offset on every
+    // keystroke would corrupt a half-typed number); Enter commits too, without needing a tab-out.
+    private void FiducialCoordinate_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || sender is not TextBox box) return;
+        box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        e.Handled = true;
+    }
+
+    // Uses the classic Windows color-chooser dialog (System.Windows.Forms.ColorDialog, this
+    // project's only System.Windows.Forms reference) rather than a hand-rolled WPF color picker -
+    // this is a small, internal desktop tool, and the built-in dialog already gives a full custom
+    // color spectrum for free. LayerColors.SetColor mutates the shared brush for this role in
+    // place, so every visual using it (the swatch itself, the rendered layer, every placed
+    // component on that side) updates immediately with no rebuild, and persists the choice.
+    private void LayerColorSwatch_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: LayerViewModel layer }) return;
+        if (!layer.IsColorEditable) return; // Paste: always the fixed shiny-gold look, per explicit instruction.
+
+        var current = ((SolidColorBrush)layer.Color).Color;
+        using var dialog = new System.Windows.Forms.ColorDialog
+        {
+            Color = System.Drawing.Color.FromArgb(current.A, current.R, current.G, current.B),
+            FullOpen = true,
+            AnyColor = true,
+        };
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+        var chosen = dialog.Color;
+        LayerColors.SetColor(layer.Role, Color.FromArgb(chosen.A, chosen.R, chosen.G, chosen.B));
+        e.Handled = true;
+    }
+
     private void ManageFootprintLibrary_Click(object sender, RoutedEventArgs e)
     {
         var window = new FootprintLibraryWindow(new FootprintLibraryViewModel()) { Owner = this };
+        window.ShowDialog();
+    }
+
+    private void ManageComponentLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new ComponentLibraryWindow(new ComponentLibraryViewModel()) { Owner = this };
         window.ShowDialog();
     }
 
@@ -394,6 +444,19 @@ public partial class MainWindow : Window
             _viewModel.UndoCombine();
             e.Handled = true;
         }
+
+        // Global Ctrl+S - a "quick save": reuses the file this project was loaded from or last
+        // saved to without prompting, only falling back to the save dialog (same one "Save
+        // Project..." always shows) when there's no such file yet - see
+        // MainViewModel.QuickSaveProjectCommand/SaveProject. Commits any in-progress DataGrid edit
+        // first so a value the user just typed and hasn't tabbed off of is actually included.
+        if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+            FeederSetupDataGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            _viewModel.QuickSaveProjectCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     private void ViewportBorder_KeyDown(object sender, KeyEventArgs e)
@@ -472,5 +535,6 @@ public partial class MainWindow : Window
         var matrix = new MatrixTransform(_scale, 0, 0, -_scale, _offsetX, _offsetY);
         LayerHost.RenderTransform = matrix;
         FixturesHost.RenderTransform = matrix;
+        FiducialsHost.RenderTransform = matrix;
     }
 }

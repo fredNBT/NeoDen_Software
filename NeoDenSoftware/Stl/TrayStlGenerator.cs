@@ -36,10 +36,45 @@ public static class TrayStlGenerator
         var pocketY1 = pocketY0 + pocketWidthMm;
 
         var pockets = new List<(double X0, double X1, double Y0, double Y1)>();
+        var cutoutSizeMm = Math.Max(settings.ComponentCutoutSizeMm, 0);
+        // Straight through the whole tray (not just to pocket depth) - a fingernail/pin can reach
+        // a part from underneath too, and pocket depth varies per footprint while this hole's
+        // depth shouldn't. Kept as its own feature list (below), not appended to `pockets` like
+        // the notches above, specifically because it needs the box's full height as its depth,
+        // not the pocket's.
+        var pocketCenterHoles = new List<(double X0, double X1, double Y0, double Y1)>();
+        var pocketCenterHoleDiameterMm = Math.Max(settings.PocketCenterHoleDiameterMm, 0);
         for (var k = 0; k < pocketCount; k++)
         {
             var x0 = gap + k * (pocketLengthMm + gap);
             pockets.Add((x0, x0 + pocketLengthMm, pocketY0, pocketY1));
+            var pocketCenterX = (x0 + x0 + pocketLengthMm) / 2;
+
+            // A small square notch above and below each pocket, centered on the pocket's own X,
+            // flush against the pocket's own Y edge (its inner edge sits exactly ON that edge, not
+            // offset into the margin) so it's part of the same open cavity, not a separate hole
+            // with a wall between them - a fingernail catch reaching straight into the pocket.
+            // Same depth as the pocket (not a separate depth band). Skipped for a pocket where the
+            // margin before the edge groove genuinely has no room for it.
+            if (cutoutSizeMm > 0)
+            {
+                var notchX0 = pocketCenterX - cutoutSizeMm / 2;
+                var notchX1 = pocketCenterX + cutoutSizeMm / 2;
+                if (pocketY0 - grooveWidth >= cutoutSizeMm)
+                    pockets.Add((notchX0, notchX1, pocketY0 - cutoutSizeMm, pocketY0));
+                if (boxWidth - grooveWidth - pocketY1 >= cutoutSizeMm)
+                    pockets.Add((notchX0, notchX1, pocketY1, pocketY1 + cutoutSizeMm));
+            }
+
+            // A round hole through the middle of the pocket - skipped for this pocket alone (not
+            // symmetrically for all of them, unlike the mounting holes) if it's wider than the
+            // pocket itself, so a big component's pocket never loses its hole just because a
+            // small one elsewhere couldn't fit one.
+            if (pocketCenterHoleDiameterMm > 0 && pocketCenterHoleDiameterMm <= pocketLengthMm && pocketCenterHoleDiameterMm <= pocketWidthMm)
+            {
+                var pocketCenterY = (pocketY0 + pocketY1) / 2;
+                pocketCenterHoles.AddRange(BuildCircleCutouts(pocketCenterX, pocketCenterY, pocketCenterHoleDiameterMm));
+            }
         }
 
         var grooves = new List<(double X0, double X1, double Y0, double Y1)>
@@ -47,6 +82,24 @@ public static class TrayStlGenerator
             (0, boxLength, 0, grooveWidth),
             (0, boxLength, boxWidth - grooveWidth, boxWidth),
         };
+
+        // Two round mounting holes straight through the whole tray, centered top-to-bottom
+        // (Y = boxWidth / 2), one inset from the left edge and one the same distance from the
+        // right - the inset is measured to each hole's own CENTER, matching "3mm inside the
+        // tray". Skipped (both, symmetrically) if the box is too narrow/short for them to fit
+        // without overlapping each other or running past an edge.
+        var mountingHoles = new List<(double X0, double X1, double Y0, double Y1)>();
+        var mountingHoleDiameterMm = Math.Max(settings.MountingHoleDiameterMm, 0);
+        var mountingHoleInsetMm = settings.MountingHoleInsetMm;
+        if (mountingHoleDiameterMm > 0 &&
+            mountingHoleInsetMm - mountingHoleDiameterMm / 2 >= 0 &&
+            mountingHoleInsetMm + mountingHoleDiameterMm / 2 <= boxLength - mountingHoleInsetMm - mountingHoleDiameterMm / 2 &&
+            mountingHoleDiameterMm <= boxWidth)
+        {
+            var holeCenterY = boxWidth / 2;
+            mountingHoles.AddRange(BuildCircleCutouts(mountingHoleInsetMm, holeCenterY, mountingHoleDiameterMm));
+            mountingHoles.AddRange(BuildCircleCutouts(boxLength - mountingHoleInsetMm, holeCenterY, mountingHoleDiameterMm));
+        }
 
         // The label sits "at the top center" of the tray: horizontally centered across the WHOLE
         // box length, in the Y margin strip between the pockets' own top edge and the top groove -
@@ -73,6 +126,10 @@ public static class TrayStlGenerator
             (pocketDepthMm, pockets),
             (grooveDepthMm, grooves),
         };
+        // Full box height, not clamped to boxHeight - 0.1 like the other features - these go all
+        // the way through, not just "deep".
+        if (mountingHoles.Count > 0) features.Add((boxHeight, mountingHoles));
+        if (pocketCenterHoles.Count > 0) features.Add((boxHeight, pocketCenterHoles));
         if (textCutouts.Count > 0) features.Add((Math.Min(Math.Max(settings.TextDepthMm, 0.1), boxHeight - 0.1), textCutouts));
 
         var thresholds = new SortedSet<double> { 0, boxHeight };
@@ -91,6 +148,28 @@ public static class TrayStlGenerator
         }
 
         return new StlMesh(triangles);
+    }
+
+    /// <summary>Rasterizes a circle of <paramref name="diameterMm"/> centered at
+    /// (<paramref name="centerX"/>, <paramref name="centerY"/>) into small cutout rectangles - the
+    /// same grid-decomposition approach <see cref="BuildTextCutouts"/> uses for glyph outlines,
+    /// with a fine ~0.1mm step so the hole reads as round rather than as a visible polygon.</summary>
+    private static List<(double X0, double X1, double Y0, double Y1)> BuildCircleCutouts(double centerX, double centerY, double diameterMm)
+    {
+        const double stepMm = 0.1;
+        var radius = diameterMm / 2;
+        var cutouts = new List<(double X0, double X1, double Y0, double Y1)>();
+        for (var gx = -radius; gx < radius; gx += stepMm)
+        {
+            for (var gy = -radius; gy < radius; gy += stepMm)
+            {
+                var midX = gx + stepMm / 2;
+                var midY = gy + stepMm / 2;
+                if (midX * midX + midY * midY > radius * radius) continue;
+                cutouts.Add((centerX + gx, centerX + gx + stepMm, centerY + gy, centerY + gy + stepMm));
+            }
+        }
+        return cutouts;
     }
 
     /// <summary>Rasterizes <paramref name="text"/>'s real glyph outlines (via WPF's own
